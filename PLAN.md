@@ -96,18 +96,22 @@ We have two real-bug test sets: verification-benchmarks for security and hwe-ben
 | Source | What it gives us | Size | License | Use |
 | --- | --- | --- | --- | --- |
 | [verification-benchmarks](https://github.com/HWSec-UNC/verification-benchmarks) | SVA security properties on buggy SoCs, each with a CWE and a JasperGold result | 119 properties | Not stated | Security test set (Phase 5) |
-| [hwe-bench](https://github.com/pku-liang/hwe-bench) | Real RTL bug fixes: problem statement, buggy commit, fix patch, and a test that fails before the fix and passes after | 417 cases; 321 are SystemVerilog RTL fixes | Apache-2.0 | General test set for types B–D; older OpenTitan cases and its mining scripts give real-bug training data |
-| [shailja/Verilog_GitHub](https://huggingface.co/datasets/shailja/Verilog_GitHub) (VeriGen) | Raw Verilog modules from GitHub | 100k–1M | MIT | Phase 1 corpus, after dedup |
-| [GaTech-EIC/MG-Verilog](https://huggingface.co/datasets/GaTech-EIC/MG-Verilog) | Verilog with descriptions at several levels of detail | Not stated | MIT | Corpus; module-function labels (type H) |
-| [bnadimi/PyraNet-Verilog](https://huggingface.co/datasets/bnadimi/PyraNet-Verilog) | Verilog with descriptions, graded by quality | 100k–1M | CC BY-NC-SA 4.0 | Corpus (fine for non-commercial use) |
-| [wyt2000/CodeV-SVA-datasets](https://huggingface.co/datasets/wyt2000/CodeV-SVA-datasets) | SVA assertions paired with RTL | 10k–100k | Apache-2.0 | Ready-made properties for type A; labels still come from our SymbiYosys runs |
-| [HPAI-BSC/SystemVerilog-RL-12k](https://huggingface.co/datasets/HPAI-BSC/SystemVerilog-RL-12k) | Correct designs with mutated versions (a good testbench passes the correct design and fails the mutant) | 1k–10k | Not stated | Correct/buggy pairs for types B and C |
-| [HPAI-BSC/SystemVerilog-SFT-86k](https://huggingface.co/datasets/HPAI-BSC/SystemVerilog-SFT-86k) | Test plans and self-checking testbenches generated from RTL | 10k–100k | Not stated | Optional context |
-| [ytliu99/TroLL-Logic-Locking-based-Hardware-Trojans](https://huggingface.co/datasets/ytliu99/TroLL-Logic-Locking-based-Hardware-Trojans) | Hardware Trojans based on logic locking | 100k–1M | CC BY 4.0 | Phase 5 Trojan data; check the format first (may be netlists, not RTL) |
+| [hwe-bench](https://github.com/pku-liang/hwe-bench) | Real RTL bug fixes: problem statement, buggy commit, fix patch, and a test that fails before the fix and passes after | 417 cases; 321 are SystemVerilog RTL fixes | Apache-2.0 | General test set for types B–D; older OpenTitan cases are the Phase 0 training data |
+| [wyt2000/CodeV-SVA-datasets](https://huggingface.co/datasets/wyt2000/CodeV-SVA-datasets) | 42K RTL modules; 324K RTL + spec + SVA triples whose SVAs were never checked against the RTL | 324K triples | Apache-2.0 | Main type A source: SymbiYosys labels each SVA as violated or holding |
+| [AnonymousHierSVA/HierSVA](https://huggingface.co/datasets/AnonymousHierSVA/HierSVA) | BaseJump STL modules with formally proven SVA, plus 28 buggy variants | 342 modules | Solderpad SHL-2.1 | Best-quality A and G labels; multi-clock seeds |
+| [aditigupta/EquivSVA](https://huggingface.co/datasets/aditigupta/EquivSVA) | 120 behavior families × 4 equivalent RTL variants, gold properties, 3 typed mutants each | 480 RTL | CC BY 4.0 | A, G, B, C; split by family |
+| [architect-ubc-capstone/rtl-augmented-v3](https://huggingface.co/datasets/architect-ubc-capstone/rtl-augmented-v3) | Injected bugs in 49 GitHub repos, with diffs and bug types | 948 bugs | MIT (upstream varies) | B, C, D; strip comments first, because some leak the label |
+| [scale-lab/MetRex](https://huggingface.co/datasets/scale-lab/MetRex) | Synthesizable RTL modules | 25,868 | BSD-3-Clause | Clean pool for mutants and properties |
+| [theepicflyer/openrtlset-permissive-verified](https://huggingface.co/datasets/theepicflyer/openrtlset-permissive-verified) | Lint-clean RTL with repo names | 13,625 | CC BY 4.0 | Clean pool with exact repo filtering |
+| [HPAI-BSC/SystemVerilog-SFT-86k](https://huggingface.co/datasets/HPAI-BSC/SystemVerilog-SFT-86k) | Test plans and testbenches generated from RTL | 85,701 | Not stated | Type H context; contains OpenTitan code, so filter first |
 
 hwe-bench's 86 Chisel cases (XiangShan, rocket-chip) are out of scope for v1, because our pipeline reads Verilog and SystemVerilog. We only need its JSONL files and git checkouts of the projects, not its 200 GB of Docker images.
 
 `tools/build_benchmarks.py` merges both benchmarks into `data/benchmarks/benchmarks.jsonl`: 119 verification-benchmarks records, all test, and 321 hwe-bench records, 126 test and 195 train under the proposed split. Each hwe-bench record links the buggy RTL files, the files with the fix applied, and the changed line ranges, which are the bug-location labels. All 1,000 patched files match GNU `patch` output. `test_exclusions.txt` lists 532 files that training data must not include.
+
+Demoted after inspection: shailja/Verilog_GitHub (not actually deduplicated, and it contains OR1200 code), HPAI-BSC/SystemVerilog-RL-12k (its mutants are gate-level netlists), and TroLL (gate-level Trojans whose net names leak the label). The full survey, including datasets built from the test families that must never be trained on, is in `docs/hf_dataset_survey.md`.
+
+**Phase 0 training data is small.** It comes from 174 OpenTitan bug fixes: 933 examples, about 4.1M tokens at an 8k window. That's enough to prove the pipeline end to end, but it's about 2% of Phase 1's ~40k-item target, all from one project. Phase 1 scales it with the sources above, more mined OpenTitan fixes (2,594 merged "fix" PRs before 2024), and our own mutants. Real files are also long: 27% of the hwe-bench training files exceed 8k tokens, and the largest is 182k. So each example is a window placed at a random offset, which keeps the bug's position in the window from giving away its location.
 
 ## Workflow
 
@@ -137,14 +141,15 @@ Phase 0 ends when one smoke run passes on CPU here and on 2 GPUs there, SymbiYos
 
 - [x] `git init`, with the GitHub remote
 - [x] Fetch both benchmarks and convert them into one record format: `tools/fetch_benchmarks.sh`, `tools/build_benchmarks.py`
-- [ ] Repo skeleton: `spec/`, `jev/`, `launch/`
-- [ ] Data format spec v0 and a mock teacher, so the pipeline can be tested without DeepSeek
-- [ ] Readout and training loop; a CPU smoke test with Qwen3-0.6B
-- [ ] Launch scripts for 2 and 4 GPUs, plus a GPU smoke test for you to run
+- [x] Repo skeleton: `spec/`, `jev/`, `launch/`, `docs/`
+- [x] Data format spec v0 (`spec/data_format.md`) and a mock mode for the teacher client
+- [x] Readout and training loop; CPU smoke test with Qwen3-0.6B (one process and 2-process DDP)
+- [x] Launch scripts for 2 and 4 GPUs, plus a GPU smoke test for you to run
+- [x] Step-by-step server guide: [Phase 0 Setup Guide](https://claude.ai/code/artifact/95cbaea8-5860-4ab6-b94c-7f0dddbb66aa), also `docs/phase0_guide.md`
 
-**You, on the server side**
+**You, on the server side:** follow the [Phase 0 Setup Guide](https://claude.ai/code/artifact/95cbaea8-5860-4ab6-b94c-7f0dddbb66aa) step by step.
 
-- [ ] GPU driver and CUDA 12.x, PyTorch, transformers, peft, flash-attn
+- [ ] PyTorch, transformers and peft at the versions in requirements.txt (flash-attn isn't needed)
 - [ ] `nvidia-smi topo -m`: the cards you use should show `NV18` between them
 - [ ] Download Qwen3-0.6B, Qwen3-1.7B and Qwen3-8B from Hugging Face
 - [ ] Install OSS CAD Suite (Yosys, SymbiYosys, solvers, Verilator, Icarus) on the machine that will run the data pipeline; check that the yosys-slang plugin loads
@@ -156,11 +161,11 @@ Phase 0 ends when one smoke run passes on CPU here and on 2 GPUs there, SymbiYos
 
 The target is about 40k RTL modules with 5–10 questions each, labeled mostly by tools. No security questions yet: question types A–D and H.
 
-1. **Collect the corpus.** Take open RTL projects (OpenTitan, Ibex, PicoRV32, and others) and split them into modules. Keep only modules that parse with yosys-slang.
+1. **Collect the corpus.** Take RTL from outside the test families: the clean module pools MetRex and openrtlset-permissive-verified, projects such as PicoRV32 and BaseJump STL, and OpenTitan files not listed in test_exclusions.txt. Split it into modules. Keep only modules that parse with yosys-slang.
     - Leave out the benchmark's design families (PULPissimo/RI5CY, Ariane/CVA6, OpenPiton, OR1200), plus every file an hwe-bench test case touches, so both test sets measure generalization.
 2. **Remove duplicates and split.** Remove near-duplicates with MinHash. Split train/val/test by project family, never by file.
 3. **Inject bugs** (types B, C, D). Use rule-based mutations (reset value, inverted condition, off-by-one, FSM transition, swapped signals, removed check) plus realistic bugs written by DeepSeek. Run an equivalence check on each mutant: one that behaves the same as the original is labeled "no bug". Older hwe-bench OpenTitan cases, plus bug fixes mined from project history with hwe-bench's scripts, add real bugs.
-4. **Write properties** (type A). DeepSeek writes SVA assertions for each clean module. SymbiYosys checks each one on the clean version and on each mutant.
+4. **Write properties** (type A). Start from CodeV-SVA's 324K RTL + SVA pairs, which only need SymbiYosys labels; DeepSeek writes assertions for modules that have none. SymbiYosys checks each one on the clean version and on each mutant.
     - A proof or a counterexample becomes a hard label. "No violation within k cycles" gets a softer label, and timeouts are dropped.
     - Aim for roughly half violated and half holding.
 5. **Answer structural questions** (type H) with tools where possible. DeepSeek labels the rest with 3–5 samples each.
@@ -256,7 +261,7 @@ The biggest risk is open-source formal tools failing on heavy SystemVerilog, bec
 | Security benchmark is small (119) and 73% violations | Noisy eval | Report recall and calibration with confidence intervals; add our own held-out security set |
 | DeepSeek is weak on hardware meaning | Bad soft labels | Measure it against tool labels in Phase 1; lower its weight |
 | Synthetic bugs don't look like real ones | Poor transfer | Test on Hack@DAC bugs; prefer realistic injections written by DeepSeek over rule-based mutations |
-| RTL longer than the context window | Truncated states | Module-level states; 8k context; a short summary of the surrounding hierarchy |
+| RTL longer than the context window | Truncated states | Windows at random offsets, so the bug's position carries no signal (27% of hwe-bench files exceed 8k tokens); module-level states for synthetic data |
 | Slow DeepSeek throughput | Data generation stalls | Measure in Phase 0; do the tool-labeled types first |
 
 ## Open questions and decision log
@@ -271,6 +276,9 @@ Five questions are open. The most important is which question types make up v1.
 
 | Date | Decision |
 | --- | --- |
+| Oct 12, 2026 | Phase 0 code written and tested on CPU; the server steps are in the Phase 0 Setup Guide |
+| Oct 12, 2026 | flash-attn dropped; PyTorch's SDPA attention is enough on H20 |
+| Oct 12, 2026 | Hugging Face sources chosen from the survey: CodeV-SVA, HierSVA and EquivSVA for A and G; rtl-augmented-v3 for B–D; MetRex and openrtlset-permissive-verified as clean pools |
 | Oct 12, 2026 | hwe-bench added as the general real-bug test set; its Chisel cases are out of scope for v1 |
 | Oct 12, 2026 | Bug location (type D) uses a pointer head over block markers |
 | Oct 12, 2026 | Qwen3-8B until the pipeline works end to end; newer base models come after that |

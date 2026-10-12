@@ -1,0 +1,16 @@
+# Install PyTorch first, from the wheel index that matches your driver (docs/phase0_guide.md, step 2).
+# `nvidia-smi` shows the newest CUDA your driver supports ("CUDA Version" in the header):
+#   13.0 or newer:  pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cu130
+#   12.6 to 12.9:   pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cu126
+# then:
+#   pip install -r requirements.txt
+#
+# These are the versions the CPU smoke test passed with (2026-10-12).
+torch==2.14.0
+transformers==5.17.0
+peft==0.21.0
+accelerate==1.15.0
+huggingface_hub==1.33.0
+tokenizers==0.23.3
+safetensors==0.8.0
+numpy==2.5.4

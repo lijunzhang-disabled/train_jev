@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Evaluate a checkpoint on both test sets, or the base model zero-shot when CHECKPOINT is unset.
+#
+#   NGPU=4 launch/eval.sh                                                   # zero-shot Qwen3-8B baseline
+#   NGPU=4 CHECKPOINT=runs/qwen3-8b-lora-v0/final OUT=runs/qwen3-8b-lora-v0/eval launch/eval.sh
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+PYTHON=${PYTHON:-python}
+NGPU=${NGPU:-4}
+MODEL=${MODEL:-Qwen/Qwen3-8B}
+DATA=${DATA:-data/phase0}
+CHECKPOINT=${CHECKPOINT:-}
+OUT=${OUT:-runs/zeroshot-$(basename "$MODEL")}
+MAX_SEQ=${MAX_SEQ:-8192}
+LIMIT=${LIMIT:-}
+
+args=(--model "$MODEL" --max-seq-tokens "$MAX_SEQ" --data "$DATA/eval_hwe.jsonl" "$DATA/eval_vb.jsonl" --out "$OUT")
+[ -n "$CHECKPOINT" ] && args+=(--checkpoint "$CHECKPOINT")
+[ -n "$LIMIT" ] && args+=(--limit "$LIMIT")
+mkdir -p "$OUT"
+"$PYTHON" -m torch.distributed.run --standalone --nproc_per_node "$NGPU" -m jev.eval "${args[@]}" 2>&1 \
+    | tee "$OUT/eval.log"
