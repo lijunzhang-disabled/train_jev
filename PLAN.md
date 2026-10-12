@@ -27,7 +27,7 @@ We fine-tune a pretrained Qwen and train it with log loss against labels we trus
 
 | Area | Choice | Why |
 | --- | --- | --- |
-| Backbone | Qwen3-8B; debug on Qwen3-1.7B; compare against Qwen3.5-9B once in Phase 4 | Standard architecture, mature tooling; 1.7B runs ~5x faster for debugging |
+| Backbone | Qwen3-8B to start; debug on Qwen3-1.7B; compare zero-shot against Qwen3.5-9B in Phase 2. Qwen3.6 and 3.8 only come in 27B and larger | Plain transformer with mature tooling; Qwen3.5-9B mixes in linear-attention layers that need extra kernels; 1.7B runs ~5x faster for debugging |
 | Inference | One forward pass. Each question gets an `<ans>` slot; logits only over that question's options (LM head sliced to those rows) | No generation; many questions per pass; no full-vocabulary logits |
 | Objective | Log loss on soft labels, weighted by label source; temperature scaling afterwards | Log loss is a proper scoring rule, so probabilities are calibrated when the labels are true outcomes |
 | Label trust | Tool-verified > by construction > teacher > human gold set (eval only) | Calibrate to facts, not to DeepSeek's opinions |
@@ -57,7 +57,7 @@ We copy the shape of [verification-benchmarks](https://github.com/HWSec-UNC/veri
 | A. Property outcome | Will formal checking find a violation of this assertion? | bool | SymbiYosys check or proof | 1 general, 5 security |
 | B. Bug presence | Does this module contain a functional bug? | bool | Injected bug + equivalence check | 1 |
 | C. Bug class | Which kind of bug is present? | enum: reset value, condition, address range, FSM, access check, data not cleared, none | Injected bug | 1, 5 |
-| D. Bug location | Which always block (or signal) is wrong? | enum over candidates listed in the question | Injected bug | 1 |
+| D. Bug location | Which always block (or signal) is wrong? | pointer head: a probability for each block marker in the input | Injected bug | 1 |
 | E. CWE | Which hardware CWE fits? | enum over ~25 CWEs used in the benchmark + none | Injection template; teacher | 5 |
 | F. OR1200 category | Control flow, privilege change, register update, memory access, or computation? | enum | Injection template; teacher | 5 |
 | G. Property–bug match | Does this assertion detect the described bug? | bool | Check on buggy vs clean design | 5 |
@@ -88,6 +88,24 @@ One training item, as a JSONL line (pretty-printed):
 ```
 
 We have no JasperGold. Our own labels come from SymbiYosys with the yosys-slang SystemVerilog frontend, run module by module. Heavy SystemVerilog may not parse, so modules that fail are dropped.
+
+## Data sources
+
+We have two real-bug test sets: verification-benchmarks for security and hwe-bench for general RTL bugs. The Hugging Face datasets below supply the training corpus, ready-made properties, and pairs of correct and buggy designs. Except for hwe-bench, I've only checked their Hugging Face metadata so far, not their files.
+
+| Source | What it gives us | Size | License | Use |
+| --- | --- | --- | --- | --- |
+| [verification-benchmarks](https://github.com/HWSec-UNC/verification-benchmarks) | SVA security properties on buggy SoCs, each with a CWE and a JasperGold result | 119 properties | Not stated | Security test set (Phase 5) |
+| [hwe-bench](https://github.com/pku-liang/hwe-bench) | Real RTL bug fixes: problem statement, buggy commit, fix patch, and a test that fails before the fix and passes after | 417 cases; 321 are SystemVerilog RTL fixes | Apache-2.0 | General test set for types B–D; older OpenTitan cases and its mining scripts give real-bug training data |
+| [shailja/Verilog_GitHub](https://huggingface.co/datasets/shailja/Verilog_GitHub) (VeriGen) | Raw Verilog modules from GitHub | 100k–1M | MIT | Phase 1 corpus, after dedup |
+| [GaTech-EIC/MG-Verilog](https://huggingface.co/datasets/GaTech-EIC/MG-Verilog) | Verilog with descriptions at several levels of detail | Not stated | MIT | Corpus; module-function labels (type H) |
+| [bnadimi/PyraNet-Verilog](https://huggingface.co/datasets/bnadimi/PyraNet-Verilog) | Verilog with descriptions, graded by quality | 100k–1M | CC BY-NC-SA 4.0 | Corpus (fine for non-commercial use) |
+| [wyt2000/CodeV-SVA-datasets](https://huggingface.co/datasets/wyt2000/CodeV-SVA-datasets) | SVA assertions paired with RTL | 10k–100k | Apache-2.0 | Ready-made properties for type A; labels still come from our SymbiYosys runs |
+| [HPAI-BSC/SystemVerilog-RL-12k](https://huggingface.co/datasets/HPAI-BSC/SystemVerilog-RL-12k) | Correct designs with mutated versions (a good testbench passes the correct design and fails the mutant) | 1k–10k | Not stated | Correct/buggy pairs for types B and C |
+| [HPAI-BSC/SystemVerilog-SFT-86k](https://huggingface.co/datasets/HPAI-BSC/SystemVerilog-SFT-86k) | Test plans and self-checking testbenches generated from RTL | 10k–100k | Not stated | Optional context |
+| [ytliu99/TroLL-Logic-Locking-based-Hardware-Trojans](https://huggingface.co/datasets/ytliu99/TroLL-Logic-Locking-based-Hardware-Trojans) | Hardware Trojans based on logic locking | 100k–1M | CC BY 4.0 | Phase 5 Trojan data; check the format first (may be netlists, not RTL) |
+
+hwe-bench's 86 Chisel cases (XiangShan, rocket-chip) are out of scope for v1, because our pipeline reads Verilog and SystemVerilog. We only need its JSONL files and git checkouts of the projects, not its 200 GB of Docker images.
 
 ## Workflow
 
@@ -135,9 +153,9 @@ Phase 0 ends when one smoke run passes on CPU here and on 2 GPUs there, SymbiYos
 The target is about 40k RTL modules with 5–10 questions each, labeled mostly by tools. No security questions yet: question types A–D and H.
 
 1. **Collect the corpus.** Take open RTL projects (OpenTitan, Ibex, PicoRV32, and others) and split them into modules. Keep only modules that parse with yosys-slang.
-    - Leave out the benchmark's design families (PULPissimo/RI5CY, Ariane/CVA6, OpenPiton, OR1200), so the security test set measures generalization.
+    - Leave out the benchmark's design families (PULPissimo/RI5CY, Ariane/CVA6, OpenPiton, OR1200), plus every file an hwe-bench test case touches, so both test sets measure generalization.
 2. **Remove duplicates and split.** Remove near-duplicates with MinHash. Split train/val/test by project family, never by file.
-3. **Inject bugs** (types B, C, D). Use rule-based mutations (reset value, inverted condition, off-by-one, FSM transition, swapped signals, removed check) plus realistic bugs written by DeepSeek. Run an equivalence check on each mutant: one that behaves the same as the original is labeled "no bug".
+3. **Inject bugs** (types B, C, D). Use rule-based mutations (reset value, inverted condition, off-by-one, FSM transition, swapped signals, removed check) plus realistic bugs written by DeepSeek. Run an equivalence check on each mutant: one that behaves the same as the original is labeled "no bug". Older hwe-bench OpenTitan cases, plus bug fixes mined from project history with hwe-bench's scripts, add real bugs.
 4. **Write properties** (type A). DeepSeek writes SVA assertions for each clean module. SymbiYosys checks each one on the clean version and on each mutant.
     - A proof or a counterexample becomes a hard label. "No violation within k cycles" gets a softer label, and timeouts are dropped.
     - Aim for roughly half violated and half holding.
@@ -153,7 +171,7 @@ Phase 2 ends with a table of baseline numbers that every later model must beat.
 **Test sets, none used for training**
 
 - Held-out project families from the Phase 1 split
-- The benchmark: 119 verification-benchmarks properties, plus the Hack@DAC bug descriptions
+- Security: 119 verification-benchmarks properties, plus the Hack@DAC bug descriptions. General: hwe-bench's test-only cases (see open questions)
 - A human gold set of about 300 items that you label
 
 **Metrics**
@@ -166,7 +184,7 @@ Phase 2 ends with a table of baseline numbers that every later model must beat.
 **Baselines**
 
 - Majority class
-- Zero-shot Qwen3-8B with the constrained readout
+- Zero-shot Qwen3-8B and Qwen3.5-9B with the constrained readout; this comparison picks the backbone
 - DeepSeek on a sample of the same questions; this sets a teacher ceiling and shows where the teacher is wrong
 
 ## Phase 3: SFT v1 (week 3)
@@ -230,7 +248,7 @@ The biggest risk is open-source formal tools failing on heavy SystemVerilog, bec
 | Yosys can't parse heavy SystemVerilog | Lost modules; no labels | yosys-slang frontend; check module by module; drop failures; fall back to Verilator simulation, which can show violations but not prove properties |
 | Bounded checks aren't proofs | "Holds" labels may be wrong | Prove mode (k-induction) where possible; softer labels for bounded-only results |
 | Mutants that change nothing | False "bug" labels | Equivalence check on every mutant |
-| Duplicates or design families shared by train and test | Inflated scores | MinHash dedup; split by family; keep benchmark families out of training |
+| Duplicates or design families shared by train and test | Inflated scores | MinHash dedup; split by family; keep benchmark families and hwe-bench test files out of training |
 | Benchmark is small (119) and skewed toward violations | Noisy eval | Report recall and calibration with confidence intervals; add our own held-out security set |
 | DeepSeek is weak on hardware meaning | Bad soft labels | Measure it against tool labels in Phase 1; lower its weight |
 | Synthetic bugs don't look like real ones | Poor transfer | Test on Hack@DAC bugs; prefer realistic injections written by DeepSeek over rule-based mutations |
@@ -239,15 +257,19 @@ The biggest risk is open-source formal tools failing on heavy SystemVerilog, bec
 
 ## Open questions and decision log
 
-Four questions are open. The most important is which question types make up v1.
+Five questions are open. The most important is which question types make up v1.
 
 - [ ] Which question types go into v1? (Proposal: A as the core, plus B, C, D and H)
+- [ ] Which hwe-bench cases are test-only? (Proposal: all Ibex, CVA6 and Caliptra cases, plus OpenTitan cases from 2024 on, for 126 in total. The 195 older OpenTitan cases become real-bug training data.)
 - [ ] Can the H20 server, or a machine next to it, reach DeepSeek? That's where the data pipeline will run.
 - [ ] Are the H20 cards 96 GB or 141 GB?
 - [ ] Do you have JasperGold access? The plan assumes open-source tools only.
 
 | Date | Decision |
 | --- | --- |
+| Oct 12, 2026 | hwe-bench added as the general real-bug test set; its Chisel cases are out of scope for v1 |
+| Oct 12, 2026 | Bug location (type D) uses a pointer head over block markers |
+| Oct 12, 2026 | Start on Qwen3-8B; compare Qwen3.5-9B zero-shot in Phase 2 |
 | Oct 12, 2026 | Task shape follows verification-benchmarks; its 119 properties are test-only |
 | Oct 12, 2026 | Personal, non-commercial project; datasets with research-only licenses allowed |
 | Oct 12, 2026 | The dev box can't reach DeepSeek; the data pipeline runs on the server side |
@@ -259,3 +281,6 @@ Four questions are open. The most important is which question types make up v1.
 
 - [HWSec-UNC/verification-benchmarks](https://github.com/HWSec-UNC/verification-benchmarks): README and per-design READMEs and property tables
 - [Security Properties for Open-Source Hardware Designs](https://arxiv.org/abs/2412.08769): the preprint the repo asks users to cite (SecDev 2025)
+- [pku-liang/hwe-bench](https://github.com/pku-liang/hwe-bench): README; case counts computed from [henryen/hwe-bench](https://huggingface.co/datasets/henryen/hwe-bench) `hwe_bench_full.jsonl`
+- [Qwen on Hugging Face](https://huggingface.co/Qwen): model list, plus the config files of [Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) and [Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B)
+- Hugging Face dataset pages linked in Data sources: metadata only
