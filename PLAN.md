@@ -27,7 +27,7 @@ We fine-tune a pretrained Qwen and train it with log loss against labels we trus
 
 | Area | Choice | Why |
 | --- | --- | --- |
-| Backbone | Qwen3-8B to start; debug on Qwen3-1.7B; compare zero-shot against Qwen3.5-9B in Phase 2. Qwen3.6 and 3.8 only come in 27B and larger | Plain transformer with mature tooling; Qwen3.5-9B mixes in linear-attention layers that need extra kernels; 1.7B runs ~5x faster for debugging |
+| Backbone | Qwen3-8B; debug on Qwen3-1.7B. Try a newer base model such as Qwen3.5-9B only after the pipeline works end to end. Qwen3.6 and 3.8 only come in 27B and larger | Plain transformer with mature tooling; Qwen3.5-9B mixes in linear-attention layers that need extra kernels; 1.7B runs ~5x faster for debugging |
 | Inference | One forward pass. Each question gets an `<ans>` slot; logits only over that question's options (LM head sliced to those rows) | No generation; many questions per pass; no full-vocabulary logits |
 | Objective | Log loss on soft labels, weighted by label source; temperature scaling afterwards | Log loss is a proper scoring rule, so probabilities are calibrated when the labels are true outcomes |
 | Label trust | Tool-verified > by construction > teacher > human gold set (eval only) | Calibrate to facts, not to DeepSeek's opinions |
@@ -41,14 +41,14 @@ We fine-tune a pretrained Qwen and train it with log loss against labels we trus
 
 We copy the shape of [verification-benchmarks](https://github.com/HWSec-UNC/verification-benchmarks): an RTL design, an SVA property, a CWE tag and a formal-verification result. Its 119 labeled properties become our security test set. We generate training data in the same shape and label it with open-source formal tools.
 
-**What the benchmark contains.** Each property comes with the bug it targets, the module, a CWE ID, and a result from Cadence JasperGold FPV, a commercial tool. Almost every result is "Violation found", because the properties were written to catch known bugs.
+**What the benchmark contains.** Each property comes with the bug it targets, the module, a CWE ID, and a result from Cadence JasperGold FPV, a commercial tool. 87 of the 119 results are "Violation found" and 32 are "No violation found".
 
 | Design folder | Base design | Known bugs | Properties written |
 | --- | --- | --- | --- |
 | [hackatdac18](https://raw.githubusercontent.com/HWSec-UNC/verification-benchmarks/main/hackatdac18/README.md) | PULPissimo SoC, RI5CY core | 31 | 20 |
 | [hackatdac19](https://raw.githubusercontent.com/HWSec-UNC/verification-benchmarks/main/hackatdac19/README.md) | Ariane (CVA6) SoC | 66 | 11 |
 | [hackatdac21](https://raw.githubusercontent.com/HWSec-UNC/verification-benchmarks/main/hackatdac21/README.md) | OpenPiton + Ariane SoC | 99 | 17 |
-| [or1200](https://raw.githubusercontent.com/HWSec-UNC/verification-benchmarks/main/or1200/README.md) | OR1200 CPU with bugs from prior work | — | 71, each also in one of 5 categories |
+| [or1200](https://raw.githubusercontent.com/HWSec-UNC/verification-benchmarks/main/or1200/README.md) | OR1200 CPU with bugs from prior work | — | 71, each also tagged with a category (6 labels in the table) |
 
 **Candidate question types** (you're still choosing; A is my recommendation for the core task):
 
@@ -58,7 +58,7 @@ We copy the shape of [verification-benchmarks](https://github.com/HWSec-UNC/veri
 | B. Bug presence | Does this module contain a functional bug? | bool | Injected bug + equivalence check | 1 |
 | C. Bug class | Which kind of bug is present? | enum: reset value, condition, address range, FSM, access check, data not cleared, none | Injected bug | 1, 5 |
 | D. Bug location | Which always block (or signal) is wrong? | pointer head: a probability for each block marker in the input | Injected bug | 1 |
-| E. CWE | Which hardware CWE fits? | enum over ~25 CWEs used in the benchmark + none | Injection template; teacher | 5 |
+| E. CWE | Which hardware CWE fits? | enum over the 26 CWEs used in the benchmark + none | Injection template; teacher | 5 |
 | F. OR1200 category | Control flow, privilege change, register update, memory access, or computation? | enum | Injection template; teacher | 5 |
 | G. Property–bug match | Does this assertion detect the described bug? | bool | Check on buggy vs clean design | 5 |
 | H. Structure | Has an FSM? Reset style? Multiple clock domains? Bus protocol? Module function? | bool / enum | Tools; teacher | 1 |
@@ -107,6 +107,8 @@ We have two real-bug test sets: verification-benchmarks for security and hwe-ben
 
 hwe-bench's 86 Chisel cases (XiangShan, rocket-chip) are out of scope for v1, because our pipeline reads Verilog and SystemVerilog. We only need its JSONL files and git checkouts of the projects, not its 200 GB of Docker images.
 
+`tools/build_benchmarks.py` merges both benchmarks into `data/benchmarks/benchmarks.jsonl`: 119 verification-benchmarks records, all test, and 321 hwe-bench records, 126 test and 195 train under the proposed split. Each hwe-bench record links the buggy RTL files, the files with the fix applied, and the changed line ranges, which are the bug-location labels. All 1,000 patched files match GNU `patch` output. `test_exclusions.txt` lists 532 files that training data must not include.
+
 ## Workflow
 
 I write and test all code on the dev box. You copy it to the server, run it, and paste back logs. The data pipeline has to run somewhere that can reach DeepSeek, because the dev box can't.
@@ -133,7 +135,9 @@ Phase 0 ends when one smoke run passes on CPU here and on 2 GPUs there, SymbiYos
 
 **Claude, on the dev box**
 
-- [ ] `git init` and the repo skeleton: `spec/`, `tools/`, `jev/`, `launch/`, with `data/` ignored by git
+- [x] `git init`, with the GitHub remote
+- [x] Fetch both benchmarks and convert them into one record format: `tools/fetch_benchmarks.sh`, `tools/build_benchmarks.py`
+- [ ] Repo skeleton: `spec/`, `jev/`, `launch/`
 - [ ] Data format spec v0 and a mock teacher, so the pipeline can be tested without DeepSeek
 - [ ] Readout and training loop; a CPU smoke test with Qwen3-0.6B
 - [ ] Launch scripts for 2 and 4 GPUs, plus a GPU smoke test for you to run
@@ -145,7 +149,7 @@ Phase 0 ends when one smoke run passes on CPU here and on 2 GPUs there, SymbiYos
 - [ ] Download Qwen3-0.6B, Qwen3-1.7B and Qwen3-8B from Hugging Face
 - [ ] Install OSS CAD Suite (Yosys, SymbiYosys, solvers, Verilator, Icarus) on the machine that will run the data pipeline; check that the yosys-slang plugin loads
 - [ ] Confirm the DeepSeek endpoint is OpenAI-compatible and reachable from that machine; measure tokens/s at batch 32
-- [ ] `git clone --recursive` verification-benchmarks, plus the HACK-EVENT hackatdac18/19/21 repos
+- [ ] Run `tools/fetch_benchmarks.sh`, then `python3 -I tools/build_benchmarks.py` (under a minute; downloads about 1,000 RTL files from GitHub)
 - [ ] Run the GPU smoke test and paste back the log
 
 ## Phase 1: General hardware dataset v1 (weeks 1–2)
@@ -179,12 +183,12 @@ Phase 2 ends with a table of baseline numbers that every later model must beat.
 - Accuracy and macro-F1 per question type
 - For type A: AUROC, and recall at a fixed false-alarm rate
 - Calibration: ECE, Brier score, reliability diagrams
-- The benchmark is almost all "Violation found", so score it on recall and calibration, not accuracy
+- 73% of verification-benchmarks results are violations (87 of 119), so report AUROC and calibration next to accuracy
 
 **Baselines**
 
 - Majority class
-- Zero-shot Qwen3-8B and Qwen3.5-9B with the constrained readout; this comparison picks the backbone
+- Zero-shot Qwen3-8B with the constrained readout
 - DeepSeek on a sample of the same questions; this sets a teacher ceiling and shows where the teacher is wrong
 
 ## Phase 3: SFT v1 (week 3)
@@ -210,14 +214,14 @@ Phase 4 fixes the training recipe; record each result in the decision log below.
 - LoRA vs full FSDP fine-tuning on 4 cards
 - Label-source weights, and the soft-label value for "no violation within k cycles"
 - Context length (4k vs 8k), and how much of the surrounding module hierarchy to include
-- Qwen3.5-9B vs Qwen3-8B
+- A newer base model (Qwen3.5-9B) vs Qwen3-8B, once the pipeline works end to end
 - Training with vs without the benchmark's design families, to measure how much familiarity with a design helps
 
 ## Phase 5: Chip security (weeks 5–8)
 
 Phase 5 ends with a target recall at a fixed false-alarm rate on the benchmark, with calibrated probabilities. It adds question types A (security properties), C, E, F and G, plus "escalate to security review".
 
-1. **CWE label set.** Use the ~25 CWE IDs the benchmark already uses (e.g., CWE-1245, CWE-1260, CWE-1234, CWE-226), plus "none".
+1. **CWE label set.** Use the 26 CWE IDs the benchmark already uses (e.g., CWE-1245, CWE-1260, CWE-1234, CWE-226), plus "none".
 2. **Security bug templates.** Base them on the bug patterns in the benchmark:
     - Lock register writable after lock, or cleared on reset
     - Debug access without authentication, or an incomplete password check
@@ -249,7 +253,7 @@ The biggest risk is open-source formal tools failing on heavy SystemVerilog, bec
 | Bounded checks aren't proofs | "Holds" labels may be wrong | Prove mode (k-induction) where possible; softer labels for bounded-only results |
 | Mutants that change nothing | False "bug" labels | Equivalence check on every mutant |
 | Duplicates or design families shared by train and test | Inflated scores | MinHash dedup; split by family; keep benchmark families and hwe-bench test files out of training |
-| Benchmark is small (119) and skewed toward violations | Noisy eval | Report recall and calibration with confidence intervals; add our own held-out security set |
+| Security benchmark is small (119) and 73% violations | Noisy eval | Report recall and calibration with confidence intervals; add our own held-out security set |
 | DeepSeek is weak on hardware meaning | Bad soft labels | Measure it against tool labels in Phase 1; lower its weight |
 | Synthetic bugs don't look like real ones | Poor transfer | Test on Hack@DAC bugs; prefer realistic injections written by DeepSeek over rule-based mutations |
 | RTL longer than the context window | Truncated states | Module-level states; 8k context; a short summary of the surrounding hierarchy |
@@ -269,7 +273,7 @@ Five questions are open. The most important is which question types make up v1.
 | --- | --- |
 | Oct 12, 2026 | hwe-bench added as the general real-bug test set; its Chisel cases are out of scope for v1 |
 | Oct 12, 2026 | Bug location (type D) uses a pointer head over block markers |
-| Oct 12, 2026 | Start on Qwen3-8B; compare Qwen3.5-9B zero-shot in Phase 2 |
+| Oct 12, 2026 | Qwen3-8B until the pipeline works end to end; newer base models come after that |
 | Oct 12, 2026 | Task shape follows verification-benchmarks; its 119 properties are test-only |
 | Oct 12, 2026 | Personal, non-commercial project; datasets with research-only licenses allowed |
 | Oct 12, 2026 | The dev box can't reach DeepSeek; the data pipeline runs on the server side |
