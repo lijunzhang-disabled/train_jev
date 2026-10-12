@@ -1,0 +1,24 @@
+# Datasets, model weights and run outputs stay out of git
+data/
+checkpoints/
+outputs/
+runs/
+logs/
+wandb/
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
