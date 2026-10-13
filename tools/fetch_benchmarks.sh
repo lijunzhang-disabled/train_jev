@@ -16,6 +16,7 @@ VB_COMMIT="f5da736829b4020fe76ec1d13cd2761199efde31"
 HWE_DATASET="henryen/hwe-bench"
 HWE_REVISION="82a42e0a05719366a326e09ddc668ea0d46c91f6"
 HWE_FILES=(hwe_bench_full.jsonl)
+HWE_SHA256=518c7781fea12e9c658f8b1b46e7736a68828da1269c983bb016722b14c5737a   # hwe_bench_full.jsonl
 HF_URL=${HF_ENDPOINT:-https://huggingface.co}   # honours a mirror, as tools/download_models.sh does
 
 mkdir -p "$RAW"
@@ -40,6 +41,7 @@ for f in "${HWE_FILES[@]}"; do
             -o "$HWE_DIR/$f.part"
         mv "$HWE_DIR/$f.part" "$HWE_DIR/$f"
     fi
+    echo "$HWE_SHA256  $HWE_DIR/$f" | sha256sum --check --quiet || { echo "FAILED: $f differs from the pinned version; delete it and rerun" >&2; exit 1; }
     echo "   $f: $(wc -l < "$HWE_DIR/$f") cases"
 done
 

@@ -10,6 +10,7 @@
 #   SOURCE=hf tools/download_models.sh
 #   SOURCE=hf HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1 tools/download_models.sh   # via a mirror
 # Re-running is safe: finished files are skipped and partial ones resume.
+# Afterwards every weight, tokenizer and config file is checked against tools/model_sha256.txt.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -47,5 +48,14 @@ for m in "${MODELS[@]}"; do
         echo "   attempt $attempt failed; retrying in 15 s (finished files are kept)"
         sleep 15
     done
+    sums=$(grep " ${dest#models/}/" tools/model_sha256.txt || true)
+    if [ -z "$sums" ]; then
+        echo "   no pinned hashes for $m; skipping the SHA-256 check"
+    elif (cd models && sha256sum --check --quiet <<< "$sums"); then
+        echo "   SHA-256 OK ($(wc -l <<< "$sums") files)"
+    else
+        echo "FAILED: files of $m differ from tools/model_sha256.txt. Delete the files listed above and rerun." >&2
+        exit 1
+    fi
 done
 echo "done; check with: python tools/check_env.py --skip-bench"

@@ -96,12 +96,22 @@ python tools/check_env.py --skip-bench
 ```
 
 - To keep the weights on a bigger disk, run `ln -s /big/disk/models models` before downloading.
-- Re-running is safe: finished files are skipped and partial ones resume. The script retries each model 3 times.
+- Re-running is safe: finished files are skipped and partial ones resume. The script retries each model 3 times, then checks every weight, tokenizer and config file against the SHA-256 hashes in `tools/model_sha256.txt`.
 - If the proxy fails here too (`ProxyError`, `504`), try these in order:
   - Bypass the proxy: `env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY tools/download_models.sh`
   - Use Hugging Face: `SOURCE=hf tools/download_models.sh`
   - Use a Hugging Face mirror: `SOURCE=hf HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1 tools/download_models.sh`
 - The launch scripts set `HF_HUB_OFFLINE=1`, so training and evaluation never contact Hugging Face.
+
+If the download fails with `CERTIFICATE_VERIFY_FAILED ... self-signed certificate in certificate chain`, the proxy re-signs HTTPS traffic with its own certificate. The system's certificate store usually trusts that certificate, but Python libraries ship their own list. Point them at the system store once; step 7 needs it too:
+
+```bash
+CA=$(ls /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt 2>/dev/null | head -1); echo "$CA"
+echo "export REQUESTS_CA_BUNDLE=$CA SSL_CERT_FILE=$CA" >> ~/.bashrc   # conda: conda env config vars set REQUESTS_CA_BUNDLE=$CA SSL_CERT_FILE=$CA
+source ~/.bashrc
+```
+
+`REQUESTS_CA_BUNDLE` covers ModelScope; `SSL_CERT_FILE` covers Hugging Face and the GitHub downloads in step 7. If `curl https://modelscope.cn` fails with a certificate error as well, the proxy's certificate isn't installed on the system. Use the file that `pip config list` shows as `cert`, or ask IT for it.
 
 **Check:** the three `model models/Qwen3-...` lines now read PASS.
 
@@ -245,6 +255,7 @@ Paste these back to me when you're done, or at the first step that fails. For an
 | NCCL error, or a hang when training starts | Another job is using the cards, or they lack a usable P2P path. Rerun with `NCCL_DEBUG=INFO` and send me the log |
 | CUDA out of memory | Another process holds memory on the card (check `nvidia-smi`), or sequences are too long. Rebuild data with `--max-seq-tokens 6144` and pass `MAX_SEQ=6144` |
 | `download_models.sh` fails, or `ProxyError: 504 Gateway Time-out` | The proxy can't reach the download site. Bypass the proxy or switch the source (step 4); re-running resumes |
+| `CERTIFICATE_VERIFY_FAILED`, `self-signed certificate in certificate chain` | The proxy inspects HTTPS. Point Python at the system certificates (step 4) |
 | `models/Qwen3-8B not found` | Step 4 didn't finish, or the command isn't running from the repo root |
 | `build_benchmarks.py` reports download failures | GitHub rate limit or a network blip. Rerun it; files already downloaded are skipped |
 | `formal smoke test: FAILED` | Usually `PATH` lacks `oss-cad-suite/bin`. The script prints the path of `sby.log` |
