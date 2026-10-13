@@ -1,6 +1,6 @@
 # Jev-like Hardware Security Model: Working Plan
 
-As of Oct 12, 2026 · Lijun Zhang
+As of Oct 13, 2026 · Lijun Zhang
 
 > This is the git-tracked copy of the plan. The live version is the Claude Doc at
 > https://claude.ai/code/artifact/b5e47478-1f63-41d8-80c5-6225dd0ea7d2. Claude updates both together.
@@ -151,7 +151,7 @@ Phase 0 ends when one smoke run passes on CPU here and on 2 GPUs there, SymbiYos
 
 - [ ] PyTorch, transformers and peft at the versions in requirements.txt (flash-attn isn't needed)
 - [ ] `nvidia-smi topo -m`: the cards you use should show `NV18` between them
-- [ ] Download Qwen3-0.6B, Qwen3-1.7B and Qwen3-8B from Hugging Face
+- [ ] Download Qwen3-0.6B, Qwen3-1.7B and Qwen3-8B from ModelScope into `models/`
 - [ ] Install OSS CAD Suite (Yosys, SymbiYosys, solvers, Verilator, Icarus) on the machine that will run the data pipeline; check that the yosys-slang plugin loads
 - [ ] Confirm the DeepSeek endpoint is OpenAI-compatible and reachable from that machine; measure tokens/s at batch 32
 - [ ] Run `tools/fetch_benchmarks.sh`, then `python3 -I tools/build_benchmarks.py` (under a minute; downloads about 1,000 RTL files from GitHub)
@@ -276,6 +276,7 @@ Five questions are open. The most important is which question types make up v1.
 
 | Date | Decision |
 | --- | --- |
+| Oct 13, 2026 | Models come from ModelScope into `models/`, because the server's proxy times out on Hugging Face. Its Qwen3 files are byte-identical to Hugging Face's |
 | Oct 12, 2026 | Phase 0 code written and tested on CPU; the server steps are in the Phase 0 Setup Guide |
 | Oct 12, 2026 | flash-attn dropped; PyTorch's SDPA attention is enough on H20 |
 | Oct 12, 2026 | Hugging Face sources chosen from the survey: CodeV-SVA, HierSVA and EquivSVA for A and G; rtl-augmented-v3 for B–D; MetRex and openrtlset-permissive-verified as clean pools |

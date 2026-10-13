@@ -16,6 +16,7 @@ VB_COMMIT="f5da736829b4020fe76ec1d13cd2761199efde31"
 HWE_DATASET="henryen/hwe-bench"
 HWE_REVISION="82a42e0a05719366a326e09ddc668ea0d46c91f6"
 HWE_FILES=(hwe_bench_full.jsonl)
+HF_URL=${HF_ENDPOINT:-https://huggingface.co}   # honours a mirror, as tools/download_models.sh does
 
 mkdir -p "$RAW"
 
@@ -35,7 +36,7 @@ mkdir -p "$HWE_DIR"
 for f in "${HWE_FILES[@]}"; do
     if [ ! -s "$HWE_DIR/$f" ]; then
         curl -fsSL --retry 3 \
-            "https://huggingface.co/datasets/$HWE_DATASET/resolve/$HWE_REVISION/$f" \
+            "$HF_URL/datasets/$HWE_DATASET/resolve/$HWE_REVISION/$f" \
             -o "$HWE_DIR/$f.part"
         mv "$HWE_DIR/$f.part" "$HWE_DIR/$f"
     fi

@@ -1,5 +1,6 @@
 # Datasets, model weights and run outputs stay out of git
 data/
+models/
 checkpoints/
 outputs/
 runs/

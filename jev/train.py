@@ -1,6 +1,6 @@
 """Fine-tune the decision model with LoRA: one process, or DDP when launched with torchrun.
 
-    torchrun --nproc_per_node 4 -m jev.train --model Qwen/Qwen3-8B \\
+    torchrun --nproc_per_node 4 -m jev.train --model models/Qwen3-8B \\
         --train data/phase0/train.jsonl --val data/phase0/val.jsonl --out runs/qwen3-8b-lora-v0 --epochs 2
 
 One optimizer step = batch_size x grad_accum sequences per process x number of processes.
@@ -27,7 +27,7 @@ from jev.model import JevModel, add_lora, load_lm, save_checkpoint, soft_cross_e
 
 def parse_args():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--model", required=True, help="base model name or path, e.g. Qwen/Qwen3-8B")
+    ap.add_argument("--model", required=True, help="base model directory (or Hugging Face id), e.g. models/Qwen3-8B")
     ap.add_argument("--train", required=True)
     ap.add_argument("--val", default=None)
     ap.add_argument("--out", required=True)

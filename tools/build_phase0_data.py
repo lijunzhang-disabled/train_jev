@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn data/benchmarks/benchmarks.jsonl into Phase 0 examples (spec/data_format.md).
 
-    python tools/build_phase0_data.py --tokenizer Qwen/Qwen3-8B --max-seq-tokens 8192 --out data/phase0
+    python tools/build_phase0_data.py --tokenizer models/Qwen3-8B --max-seq-tokens 8192 --out data/phase0
 
 Needs `transformers` for the tokenizer. Writes train.jsonl, val.jsonl, eval_hwe.jsonl, eval_vb.jsonl and
 stats.json. Every example is rendered with jev/format.py to check that it fits in --max-seq-tokens.
@@ -232,7 +232,7 @@ def split_of(record, val_fraction):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--tokenizer", default="Qwen/Qwen3-8B")
+    ap.add_argument("--tokenizer", default=os.path.join(ROOT, "models", "Qwen3-8B"))
     ap.add_argument("--max-seq-tokens", type=int, default=8192)
     ap.add_argument("--block-lines", type=int, default=16)
     ap.add_argument("--val-fraction", type=float, default=0.1)

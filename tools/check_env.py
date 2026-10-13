@@ -2,12 +2,13 @@
 """Check the training environment (step 3 of docs/phase0_guide.md). Prints PASS / WARN / FAIL per check.
 
     python tools/check_env.py                       # all visible GPUs
-    CUDA_VISIBLE_DEVICES=0,1 python tools/check_env.py --models Qwen/Qwen3-0.6B Qwen/Qwen3-8B
+    CUDA_VISIBLE_DEVICES=0,1 python tools/check_env.py --models models/Qwen3-0.6B models/Qwen3-8B
 
 Exits non-zero if any check FAILs.
 """
 import argparse
 import importlib
+import json
 import os
 import re
 import shutil
@@ -144,21 +145,31 @@ def check_nccl(n):
 
 
 def check_models(models):
-    try:
-        from huggingface_hub import snapshot_download
-    except ImportError:
-        return
+    """Each model directory has a config, a tokenizer and every weight shard its index lists."""
     for m in models:
-        try:
-            path = snapshot_download(m, local_files_only=True)
-            report("PASS", f"model {m}", path)
-        except Exception:  # noqa: BLE001
+        path = m if os.path.isabs(m) else os.path.join(ROOT, m)
+        if not os.path.isdir(path):
             report("WARN", f"model {m}", "not downloaded yet (tools/download_models.sh)")
+            continue
+        index = os.path.join(path, "model.safetensors.index.json")
+        if os.path.exists(index):
+            weights = sorted(set(json.load(open(index))["weight_map"].values()))
+        else:
+            weights = ["model.safetensors"]
+        missing = [f for f in ["config.json", "tokenizer.json", "tokenizer_config.json"] + weights
+                   if not os.path.isfile(os.path.join(path, f))]
+        partial = [f for f in os.listdir(path) if f.endswith(".incomplete")]
+        if missing or partial:
+            problems = ([f"missing {', '.join(missing)}"] if missing else []) + \
+                       ([f"unfinished {', '.join(partial)}"] if partial else [])
+            report("FAIL", f"model {m}", f"incomplete download ({'; '.join(problems)}): rerun tools/download_models.sh")
+            continue
+        size = sum(os.path.getsize(os.path.join(path, f)) for f in weights) / 2 ** 30
+        report("PASS", f"model {m}", f"{len(weights)} weight file(s), {size:.1f} GiB")
 
 
 def check_disk():
-    hf_home = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
-    for label, path in (("HF cache", hf_home), ("repo", ROOT)):
+    for label, path in (("models", os.path.realpath(os.path.join(ROOT, "models"))), ("repo", ROOT)):
         probe = path
         while not os.path.exists(probe):
             probe = os.path.dirname(probe)
@@ -168,7 +179,7 @@ def check_disk():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--models", nargs="*", default=["Qwen/Qwen3-0.6B", "Qwen/Qwen3-1.7B", "Qwen/Qwen3-8B"])
+    ap.add_argument("--models", nargs="*", default=["models/Qwen3-0.6B", "models/Qwen3-1.7B", "models/Qwen3-8B"])
     ap.add_argument("--skip-bench", action="store_true", help="skip the matmul and NCCL benchmarks")
     args = ap.parse_args()
 

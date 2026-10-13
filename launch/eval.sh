@@ -7,14 +7,17 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PYTHON=${PYTHON:-python}
+# No Hugging Face requests during runs (a slow proxy would stall them); models load from models/.
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 NGPU=${NGPU:-4}
-MODEL=${MODEL:-Qwen/Qwen3-8B}
+MODEL=${MODEL:-models/Qwen3-8B}   # from tools/download_models.sh
 DATA=${DATA:-data/phase0}
 CHECKPOINT=${CHECKPOINT:-}
 OUT=${OUT:-runs/zeroshot-$(basename "$MODEL")}
 MAX_SEQ=${MAX_SEQ:-8192}
 LIMIT=${LIMIT:-}
 
+[ -d "$MODEL" ] || [[ "$MODEL" != models/* ]] || { echo "$MODEL not found: run tools/download_models.sh" >&2; exit 1; }
 args=(--model "$MODEL" --max-seq-tokens "$MAX_SEQ" --data "$DATA/eval_hwe.jsonl" "$DATA/eval_vb.jsonl" --out "$OUT")
 [ -n "$CHECKPOINT" ] && args+=(--checkpoint "$CHECKPOINT")
 [ -n "$LIMIT" ] && args+=(--limit "$LIMIT")

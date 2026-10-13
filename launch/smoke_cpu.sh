@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PYTHON=${PYTHON:-.venv/bin/python}
-MODEL=${MODEL:-Qwen/Qwen3-0.6B}
+MODEL=${MODEL:-models/Qwen3-0.6B}   # from tools/download_models.sh
 DATA=data/phase0_cpu
 OUT=runs/smoke_cpu
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}

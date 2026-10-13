@@ -1,6 +1,6 @@
 """Evaluate a checkpoint (or the bare base model, zero-shot) on one or more example files.
 
-    torchrun --nproc_per_node 4 -m jev.eval --model Qwen/Qwen3-8B --checkpoint runs/x/final \\
+    torchrun --nproc_per_node 4 -m jev.eval --model models/Qwen3-8B --checkpoint runs/x/final \\
         --data data/phase0/eval_hwe.jsonl data/phase0/eval_vb.jsonl --out runs/x/eval
 
 Writes <out>/<file stem>.predictions.jsonl and <out>/<file stem>.metrics.json, and prints the metrics.
@@ -39,7 +39,7 @@ def predict(model, dataset, rank, world, device):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--model", required=True, help="base model name or path, e.g. Qwen/Qwen3-8B")
+    ap.add_argument("--model", required=True, help="base model directory (or Hugging Face id), e.g. models/Qwen3-8B")
     ap.add_argument("--checkpoint", default=None, help="dir written by jev.train (omit for zero-shot)")
     ap.add_argument("--data", nargs="+", required=True)
     ap.add_argument("--out", required=True)

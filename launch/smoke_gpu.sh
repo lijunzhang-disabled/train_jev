@@ -8,14 +8,17 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PYTHON=${PYTHON:-python}
+# No Hugging Face requests during runs (a slow proxy would stall them); models load from models/.
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 NGPU=${NGPU:-2}
-MODEL=${MODEL:-Qwen/Qwen3-0.6B}
+MODEL=${MODEL:-models/Qwen3-0.6B}   # from tools/download_models.sh
 DATA=${DATA:-data/phase0}
 OUT=${OUT:-runs/smoke_gpu}
 MAX_SEQ=${MAX_SEQ:-8192}
 STEPS=${STEPS:-20}
 LIMIT=${LIMIT:-64}
 
+[ -d "$MODEL" ] || [[ "$MODEL" != models/* ]] || { echo "$MODEL not found: run tools/download_models.sh" >&2; exit 1; }
 if [ ! -f "$DATA/train.jsonl" ]; then
     "$PYTHON" tools/build_phase0_data.py --tokenizer "$MODEL" --max-seq-tokens "$MAX_SEQ" --out "$DATA"
 fi

@@ -1,6 +1,6 @@
 # Phase 0 Setup Guide: H20 Server
 
-As of Oct 12, 2026. Git copy of the Claude Doc at
+As of Oct 13, 2026. Git copy of the Claude Doc at
 https://claude.ai/code/artifact/95cbaea8-5860-4ab6-b94c-7f0dddbb66aa (Claude updates both together).
 
 ## Overview
@@ -19,7 +19,7 @@ Run the steps in order. Each one ends with a check, and the section after step 9
 8. GPU smoke run on 2 cards (10 min)
 9. First real run: zero-shot baseline, then Qwen3-8B LoRA (1–2 h)
 
-The guide assumes Linux, a working NVIDIA driver and CUDA, Python 3.10–3.13, git, and internet access to GitHub, PyPI and Hugging Face. Commands run from the repo root unless a step says otherwise.
+The guide assumes Linux, a working NVIDIA driver and CUDA, Python 3.10–3.13, git, and internet access to GitHub, PyPI, and ModelScope or Hugging Face. Commands run from the repo root unless a step says otherwise.
 
 ## Step 1: Get the code
 
@@ -88,17 +88,22 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python tools/check_env.py
 
 ## Step 4: Download the models
 
-Three Qwen3 checkpoints go into the Hugging Face cache, about 22 GB in total: 0.6B for smoke runs, 1.7B for fast debugging, and 8B for real runs.
+Three Qwen3 checkpoints, about 22 GB in total, go into `models/` in the repo, which git ignores: 0.6B for smoke runs, 1.7B for fast debugging, and 8B for real runs. Every later script loads them from there. They come from ModelScope, whose Qwen3 files are byte-identical to Hugging Face's: I compared the SHA-256 of every weight, tokenizer and config file.
 
 ```bash
 tools/download_models.sh
 python tools/check_env.py --skip-bench
 ```
 
-- The cache lives in `~/.cache/huggingface`. To put it on a bigger disk, `export HF_HOME=/big/disk/hf` before downloading, and keep it set for every later step.
-- Setting `HF_TOKEN` (a free Hugging Face read token) raises the download rate limit.
+- To keep the weights on a bigger disk, run `ln -s /big/disk/models models` before downloading.
+- Re-running is safe: finished files are skipped and partial ones resume. The script retries each model 3 times.
+- If the proxy fails here too (`ProxyError`, `504`), try these in order:
+  - Bypass the proxy: `env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY tools/download_models.sh`
+  - Use Hugging Face: `SOURCE=hf tools/download_models.sh`
+  - Use a Hugging Face mirror: `SOURCE=hf HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1 tools/download_models.sh`
+- The launch scripts set `HF_HUB_OFFLINE=1`, so training and evaluation never contact Hugging Face.
 
-**Check:** the three `model Qwen/...` lines now read PASS.
+**Check:** the three `model models/Qwen3-...` lines now read PASS.
 
 ## Step 5: Formal tools and the SymbiYosys smoke test
 
@@ -150,8 +155,10 @@ Three commands download both benchmarks, merge them, and turn them into training
 ```bash
 tools/fetch_benchmarks.sh                       # ~10 s
 python3 -I tools/build_benchmarks.py            # ~30 s; downloads ~1,000 RTL files from GitHub
-python tools/build_phase0_data.py --tokenizer Qwen/Qwen3-8B --max-seq-tokens 8192 --out data/phase0   # ~1-2 min
+python tools/build_phase0_data.py --tokenizer models/Qwen3-8B --max-seq-tokens 8192 --out data/phase0   # ~1-2 min
 ```
+
+`fetch_benchmarks.sh` downloads hwe-bench from Hugging Face. If that hits the same proxy error, run it as `HF_ENDPOINT=https://hf-mirror.com tools/fetch_benchmarks.sh`; the file is pinned to the same revision either way.
 
 Each hwe-bench bug fix yields three kinds of examples per changed file:
 
@@ -237,7 +244,8 @@ Paste these back to me when you're done, or at the first step that fails. For an
 | `python: command not found`, or old packages, in a launch script | The venv isn't active. Run `source .venv/bin/activate`, or prefix the command with `PYTHON=.venv/bin/python` |
 | NCCL error, or a hang when training starts | Another job is using the cards, or they lack a usable P2P path. Rerun with `NCCL_DEBUG=INFO` and send me the log |
 | CUDA out of memory | Another process holds memory on the card (check `nvidia-smi`), or sequences are too long. Rebuild data with `--max-seq-tokens 6144` and pass `MAX_SEQ=6144` |
-| Model downloads fail or crawl | Set `HF_TOKEN`; retry, since finished files are skipped |
+| `download_models.sh` fails, or `ProxyError: 504 Gateway Time-out` | The proxy can't reach the download site. Bypass the proxy or switch the source (step 4); re-running resumes |
+| `models/Qwen3-8B not found` | Step 4 didn't finish, or the command isn't running from the repo root |
 | `build_benchmarks.py` reports download failures | GitHub rate limit or a network blip. Rerun it; files already downloaded are skipped |
 | `formal smoke test: FAILED` | Usually `PATH` lacks `oss-cad-suite/bin`. The script prints the path of `sby.log` |
 | `teacher.py`: `cannot reach ...` | Wrong URL (it usually needs `/v1`), the server is down, or a firewall is in the way |
@@ -248,8 +256,8 @@ Every script below was run on the dev box before handoff. The GPU scripts were r
 
 | Script | What it does | Step |
 | --- | --- | --- |
-| `tools/check_env.py` | Library versions, GPUs, bf16 matmul speed, NVLink topology, NCCL bandwidth, models in cache, free disk | 3 |
-| `tools/download_models.sh` | Downloads Qwen3-0.6B / 1.7B / 8B into the Hugging Face cache | 4 |
+| `tools/check_env.py` | Library versions, GPUs, bf16 matmul speed, NVLink topology, NCCL bandwidth, downloaded models, free disk | 3 |
+| `tools/download_models.sh` | Downloads Qwen3-0.6B / 1.7B / 8B into `models/`, from ModelScope (or Hugging Face with `SOURCE=hf`) | 4 |
 | `tools/install_oss_cad_suite.sh` | Installs the pinned OSS CAD Suite build without root | 5 |
 | `tools/formal_smoke.sh` | SymbiYosys proves one property and catches one injected bug; checks yosys-slang | 5 |
 | `tools/teacher.py` | DeepSeek client: `check` (connection) and `bench` (throughput); `--mock` for testing | 6 |
@@ -268,7 +276,7 @@ Launch scripts take their settings from environment variables:
 | Variable | Meaning | Default |
 | --- | --- | --- |
 | `NGPU` | Number of processes / GPUs | 2 (smoke), 4 (train, eval) |
-| `MODEL` | Base model | Qwen/Qwen3-0.6B (smoke), Qwen/Qwen3-8B |
+| `MODEL` | Base model directory | `models/Qwen3-0.6B` (smoke), `models/Qwen3-8B` |
 | `RUN` / `OUT` | Output directory | under `runs/` |
 | `EPOCHS`, `LR`, `SEQ_PER_STEP` | Training length, LoRA learning rate, sequences per optimizer step | 2, 1e-4, 16 |
 | `MAX_SEQ` | Token limit; must match the data build | 8192 |

@@ -8,8 +8,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PYTHON=${PYTHON:-python}
+# No Hugging Face requests during runs (a slow proxy would stall them); models load from models/.
+export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 NGPU=${NGPU:-4}
-MODEL=${MODEL:-Qwen/Qwen3-8B}
+MODEL=${MODEL:-models/Qwen3-8B}   # from tools/download_models.sh
 DATA=${DATA:-data/phase0}
 RUN=${RUN:-runs/qwen3-8b-lora-v0}
 EPOCHS=${EPOCHS:-2}
@@ -20,6 +22,7 @@ MAX_SEQ=${MAX_SEQ:-8192}
 EXTRA=${EXTRA:-}   # extra jev.train flags, e.g. EXTRA="--max-steps 10"
 EVAL_LIMIT=${EVAL_LIMIT:-}   # evaluate only the first N examples of each test set
 
+[ -d "$MODEL" ] || [[ "$MODEL" != models/* ]] || { echo "$MODEL not found: run tools/download_models.sh" >&2; exit 1; }
 mkdir -p "$RUN"
 RUNNER=("$PYTHON" -m torch.distributed.run --standalone --nproc_per_node "$NGPU")
 
