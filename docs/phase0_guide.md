@@ -135,7 +135,7 @@ yosys-slang: loaded
 formal smoke test: OK
 ```
 
-- The download (710 MB) resumes where it breaks, both within a run and when you rerun the script, and the finished file is checked against GitHub's SHA-256 for this release.
+- The download (710 MB) runs over 8 parallel connections (for more: `CONNECTIONS=16 tools/install_oss_cad_suite.sh ~/opt`) and resumes where it stopped, both within a run and when you rerun the script. The finished file is checked against GitHub's SHA-256 for this release. Run it inside `tmux` or `screen` so a dropped SSH session doesn't stop it.
 - If it keeps breaking, download the file on any machine with a better connection from <https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-09-28/oss-cad-suite-linux-x64-20260928.tgz>, copy it into `~/opt/` on the server (for example `scp oss-cad-suite-linux-x64-20260928.tgz SERVER:opt/`), and rerun the script. It checks the file's hash and installs from it.
 - Add only `bin/` to PATH. Don't source the suite's `environment` script, which changes your Python setup.
 - `yosys-slang` is the fuller SystemVerilog frontend that Phase 1 needs. This build already includes it.
@@ -260,7 +260,7 @@ Paste these back to me when you're done, or at the first step that fails. For an
 | `CERTIFICATE_VERIFY_FAILED`, `self-signed certificate in certificate chain` | The proxy inspects HTTPS. Point Python at the system certificates (step 4) |
 | `models/Qwen3-8B not found` | Step 4 didn't finish, or the command isn't running from the repo root |
 | `build_benchmarks.py` reports download failures | GitHub rate limit or a network blip. Rerun it; files already downloaded are skipped |
-| The OSS CAD Suite download keeps breaking | Rerun `install_oss_cad_suite.sh`; it resumes. Or copy the `.tgz` in from another machine (step 5) |
+| The OSS CAD Suite download is slow or keeps breaking | Rerun `install_oss_cad_suite.sh`; it resumes. Try `CONNECTIONS=16`, or copy the `.tgz` in from another machine (step 5) |
 | `formal smoke test: FAILED` | Usually `PATH` lacks `oss-cad-suite/bin`. The script prints the path of `sby.log` |
 | `teacher.py`: `cannot reach ...` | Wrong URL (it usually needs `/v1`), the server is down, or a firewall is in the way |
 
