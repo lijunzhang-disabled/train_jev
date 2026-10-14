@@ -1,7 +1,7 @@
 """Fine-tune the decision model with LoRA: one process, or DDP when launched with torchrun.
 
     torchrun --nproc_per_node 4 -m jev.train --model models/Qwen3-8B \\
-        --train data/phase0/train.jsonl --val data/phase0/val.jsonl --out runs/qwen3-8b-lora-v0 --epochs 2
+        --train data/phase0/train.jsonl --val data/phase0/val.jsonl --out runs/qwen3-8b-lora-v1 --epochs 2
 
 One optimizer step = batch_size x grad_accum sequences per process x number of processes.
 Writes <out>/log.jsonl, <out>/step-N/ every --save-every steps, and <out>/final/.
@@ -18,7 +18,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler, RandomSampler
 
 from jev import distributed
-from jev.data import JevDataset, collate
+from jev.data import GroupSampler, JevDataset, collate
 from jev.eval import predict
 from jev.format import Renderer
 from jev.metrics import summarize
@@ -37,7 +37,9 @@ def parse_args():
     ap.add_argument("--batch-size", type=int, default=1, help="sequences per process per micro-batch")
     ap.add_argument("--grad-accum", type=int, default=4)
     ap.add_argument("--lr", type=float, default=1e-4, help="LoRA learning rate")
-    ap.add_argument("--head-lr", type=float, default=1e-3, help="pointer head learning rate")
+    ap.add_argument("--head-lr", type=float, default=1e-4,
+                    help="pointer head learning rate (Adam moves each weight ~lr per step, and the head reads "
+                         "4096-wide inputs, so 1e-3 swings the pointer logits by tens per step)")
     ap.add_argument("--warmup-ratio", type=float, default=0.05)
     ap.add_argument("--max-grad-norm", type=float, default=1.0)
     ap.add_argument("--lora-r", type=int, default=64)
@@ -51,6 +53,8 @@ def parse_args():
     ap.add_argument("--val-limit", type=int, default=None)
     ap.add_argument("--limit-train", type=int, default=None, help="use only the first N training examples")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--shuffle", choices=["group", "example"], default="group",
+                    help="group: a fix's buggy, fixed and elsewhere versions train in the same step (see GroupSampler)")
     return ap.parse_args()
 
 
@@ -79,7 +83,8 @@ def validate(model, val_ds, rank, world, device, step, log):
     if rank == 0:
         report = summarize(preds)
         log({"step": step, "val": report})
-        line = "  ".join(f"{qid} acc {m['accuracy']:.3f} nll {m['nll']:.3f}" for qid, m in report.items())
+        line = "  ".join(f"{qid} acc {m['accuracy']:.3f} nll {m['nll']:.3f}"
+                         + (f" pairs {m['pair_accuracy']:.3f}" if m.get("n_pairs") else "") for qid, m in report.items())
         print(f"   val @ step {step}: {line}", flush=True)
 
 
@@ -123,7 +128,9 @@ def main():
     opt = torch.optim.AdamW(groups, weight_decay=0.0)
     ddp = DDP(model, device_ids=[device.index] if device.type == "cuda" else None) if world > 1 else model
 
-    if world > 1:
+    if args.shuffle == "group":
+        sampler = GroupSampler(train_ds, rank, world, args.seed)
+    elif world > 1:
         sampler = DistributedSampler(train_ds, num_replicas=world, rank=rank, shuffle=True, seed=args.seed)
     else:
         sampler = RandomSampler(train_ds, generator=torch.Generator().manual_seed(args.seed))

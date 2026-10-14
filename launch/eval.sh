@@ -3,7 +3,7 @@
 #
 #   NGPU=4 launch/eval.sh                                                   # zero-shot Qwen3-8B baseline
 #   NGPU=4 POINTER=lm launch/eval.sh       # zero-shot, bug location read from the LM's text answer
-#   NGPU=4 CHECKPOINT=runs/qwen3-8b-lora-v0/final OUT=runs/qwen3-8b-lora-v0/eval launch/eval.sh
+#   NGPU=4 CHECKPOINT=runs/qwen3-8b-lora-v1/final OUT=runs/qwen3-8b-lora-v1/eval launch/eval.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

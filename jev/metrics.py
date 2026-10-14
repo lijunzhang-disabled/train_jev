@@ -49,6 +49,33 @@ def topk_credit(probs, gold, k):
     return 1 - math.comb(tied - tied_gold, slots) / math.comb(tied, slots)
 
 
+def bug_score(p):
+    """The probability that the answer means "there is a bug": P(yes), 1 - P(no bug) or 1 - P(none)."""
+    options, probs = p["options"], p["probs"]
+    if p["type"] == "pointer":
+        return 1 - probs[-1]
+    if options[:2] == ["yes", "no"]:
+        return probs[0]
+    if "no bug" in options:
+        return 1 - probs[options.index("no bug")]
+    return None
+
+
+def pair_accuracy(ps):
+    """The share of buggy/fixed pairs (ids ending in /buggy and /fixed) in which the buggy version gets the
+    higher bug probability; ties count half. Pairs cancel what differs between files, so this is the most
+    direct test of whether the model tells a bug from its fix. Returns (accuracy, pairs)."""
+    by_file = collections.defaultdict(dict)
+    for p in ps:
+        key, _, kind = p.get("id", "").rpartition("/")
+        if kind in ("buggy", "fixed"):
+            by_file[key][kind] = bug_score(p)
+    diffs = [d["buggy"] - d["fixed"] for d in by_file.values() if len(d) == 2 and None not in d.values()]
+    if not diffs:
+        return None, 0
+    return float(np.mean([(d > 0) + 0.5 * (d == 0) for d in diffs])), len(diffs)
+
+
 def macro_f1(pred, gold, classes):
     scores = []
     for c in classes:
@@ -96,13 +123,22 @@ def summarize(predictions):
             m["top3_when_bug"] = float(np.mean([c for c, b in zip(top3, has_bug) if b])) if any(has_bug) else None
             m["accuracy_when_none"] = (float(np.mean([c for c, b in zip(correct, has_bug) if not b]))
                                        if not all(has_bug) else None)
+            # where in a buggy file, ranking the blocks only: measures finding the bug apart from deciding there is one
+            buggy = [(p["probs"][:-1], g) for p, g, b in zip(ps, golds, has_bug) if b]
+            if buggy:
+                for k, name in ((1, "accuracy"), (3, "top3")):
+                    m[f"block_{name}_when_bug"] = float(np.mean([topk_credit(pr, g, k) for pr, g in buggy]))
+                    m[f"block_{name}_chance_when_bug"] = float(np.mean([topk_credit(np.ones(len(pr)), g, k)
+                                                                        for pr, g in buggy]))
             m["mean_blocks"] = float(np.mean([len(p["options"]) - 1 for p in ps]))
+        m["pair_accuracy"], m["n_pairs"] = pair_accuracy(ps)
         report[qid] = m
     return report
 
 
 def format_report(report):
-    """The printed form of summarize()'s report: one line per question, plus the buggy/no-bug split for pointers."""
+    """The printed form of summarize()'s report: one line per question, then for a pointer the buggy/no-bug split
+    and blocks-only ranking, and for buggy/fixed pairs how often the buggy version looks buggier."""
     lines = []
     for qid, m in report.items():
         extra = "".join(f"  {k} {m[k]:.3f}" for k in ("macro_f1", "auroc_yes", "top3_accuracy") if m.get(k) is not None)
@@ -112,6 +148,12 @@ def format_report(report):
             if m["accuracy_when_none"] is not None:
                 split += f"   no bug n={m['n'] - m['n_when_bug']}  acc {m['accuracy_when_none']:.3f}"
             lines.append("   " + split)
+            lines.append(f"   {'':18} buggy, blocks only  acc {m['block_accuracy_when_bug']:.3f}  "
+                         f"top3 {m['block_top3_when_bug']:.3f}   chance {m['block_accuracy_chance_when_bug']:.3f} / "
+                         f"{m['block_top3_chance_when_bug']:.3f}")
+        if m.get("n_pairs"):
+            lines.append(f"   {'':18} pairs n={m['n_pairs']:5}  buggy version rated buggier {m['pair_accuracy']:.3f}"
+                         f"   chance 0.500")
     return lines
 
 

@@ -94,4 +94,5 @@ class Renderer:
 
         if len(ids) > self.max_seq_tokens:
             return None
-        return {"id": example["id"], "input_ids": ids, "questions": questions}
+        return {"id": example["id"], "group": example.get("group", example["id"]), "input_ids": ids,
+                "questions": questions}

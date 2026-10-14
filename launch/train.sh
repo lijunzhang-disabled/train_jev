@@ -3,7 +3,7 @@
 # then evaluation on both test sets. Keeps 16 sequences per optimizer step whatever NGPU is.
 #
 #   NGPU=4 launch/train.sh
-#   NGPU=2 RUN=runs/qwen3-8b-lora-v0-2gpu launch/train.sh
+#   NGPU=2 RUN=runs/qwen3-8b-lora-v1-2gpu launch/train.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -13,7 +13,7 @@ export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 NGPU=${NGPU:-4}
 MODEL=${MODEL:-models/Qwen3-8B}   # from tools/download_models.sh
 DATA=${DATA:-data/phase0}
-RUN=${RUN:-runs/qwen3-8b-lora-v0}
+RUN=${RUN:-runs/qwen3-8b-lora-v1}
 EPOCHS=${EPOCHS:-2}
 SEQ_PER_STEP=${SEQ_PER_STEP:-16}
 GRAD_ACCUM=${GRAD_ACCUM:-$((SEQ_PER_STEP / NGPU))}

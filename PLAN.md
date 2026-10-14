@@ -189,6 +189,8 @@ Phase 2 ends with a table of baseline numbers that every later model must beat.
 - For type A: AUROC, and recall at a fixed false-alarm rate
 - Calibration: ECE, Brier score, reliability diagrams
 - 73% of verification-benchmarks results are violations (87 of 119), so report AUROC and calibration next to accuracy
+- Buggy/fixed pairs: how often the buggy version gets the higher bug probability (0.5 = chance). It cancels what differs between files, so it is the most sensitive test of whether the model tells a bug from its fix
+- Bug location on buggy files, ranking only the blocks: finding the bug, apart from deciding there is one
 
 **Baselines**
 
@@ -212,6 +214,29 @@ Base rate = always answering the most common label (acc) or predicting the label
 - **Qwen's written answer** (`POINTER=lm`, the block number or "none" Qwen would write after "Q3:"): the 0.577 is the share of files without a bug, so Qwen almost certainly answers "none" on nearly every file. Its top-3 is 0.723 against 0.689 for the baseline. Its NLL is 3× the baseline's because it is confidently wrong on the buggy files. Its Q1 answer meanwhile says "yes" on roughly a third of the files, so its answers contradict each other. The eval log now prints a buggy/no-bug split under bug_location; `python -m jev.metrics runs/zeroshot-Qwen3-8B-lmpointer/eval_hwe.predictions.jsonl` prints it from the saved predictions.
 - **Rerun noise:** the two runs' other numbers differ in the third decimal (one or two near-ties flipping in bf16 on the GPU).
 - **First build:** on the 1,045-example test set the numbers were within 0.01 of these.
+
+**LoRA v0** (Oct 14, 2026: 910 training examples, 2 epochs = 114 steps, 26 min on 4 H20s, 24 GB peak per card) learned how often each answer is right, and almost nothing else. It gives every test file the majority answer ("no", "no bug", "none"), and its log loss matches the base rate's. Validation accuracy equals the validation majority (0.540) at every checkpoint. Training loss ended near 1.3, against 1.40 for predicting the label frequencies.
+
+| Question | Base-rate NLL | Zero-shot NLL | LoRA v0 NLL | LoRA v0 ECE | LoRA v0 acc | LoRA v0 AUROC |
+| --- | --- | --- | --- | --- | --- | --- |
+| bug_present | 0.681 | 2.837 | 0.679 | 0.009 | 0.576 | 0.528 |
+| bug_category | 1.292 | 1.973 | 1.320 | 0.019 | 0.577 | |
+| bug_location | 1.980 | 3.055 | 1.956 | 0.061 | 0.577 (top-3 0.723) | |
+| property_violated | 0.582 | 2.820 | 0.744 | 0.247 | 0.286 | 0.298 |
+
+- **Calibration:** ECE on bug_present fell from 0.40 to 0.01, but only because the model now predicts the base rate.
+- **bug_location** is the only sign of learning: NLL 1.956 against 1.980 for the baseline on the test set, and 2.064 against 2.128 on validation. Whether it ranks the right blocks shows in the eval's new blocks-only line.
+- **property_violated** isn't trained in Phase 0. LoRA moved it toward "no", and AUROC fell from 0.449 to 0.298. OR1200 holds 28 of the 32 "no" cases, so a design-family effect is the likely cause; not checked yet.
+
+**Why, and the v1 recipe.** A buggy file and its fix are near-identical inputs with opposite labels. v0 shuffled single examples, so a file's two versions trained in different steps and pushed the model in opposite directions; the base rates are where that tug-of-war settles. A memorization test on CPU (Qwen3-0.6B, 8 training examples, Oct 14) confirmed it:
+
+- **The pipeline learns:** bug location fell from 1.42 (base rate) to 0.53 log loss in 10 steps.
+- **Twins in separate steps swing:** at learning rate 3e-4, bug_present flipped between confident answers, and its log loss rose to 3.78 by step 20.
+- **Twins in the same step move the right way:** at the real 1e-4, with all 8 examples in every step, the buggy version got the higher bug probability in all 3 pairs by step 5. Log loss was still at the base rate; the test stopped at step 5 to spare the shared CPU.
+
+LoRA v1 therefore shuffles whole fixes instead of single examples (`--shuffle group`, now the default), so a fix's buggy, fixed and elsewhere versions train in the same step. It also lowers the pointer head's learning rate from 1e-3 to 1e-4. Adam moves every weight by about the learning rate per step, and the head reads 4,096-wide inputs, so 1e-3 could swing pointer logits by tens in one step; v0's validation loss for bug location bounced between 2.10 and 2.33.
+
+
 
 ## Phase 3: SFT v1 (week 3)
 
@@ -293,6 +318,7 @@ Five questions are open. The most important is which question types make up v1.
 
 | Date | Decision |
 | --- | --- |
+| Oct 14, 2026 | LoRA v0 learned only the base rates. v1 recipe: whole fixes are shuffled, so a buggy file and its fix train in the same step (`--shuffle group`), and the pointer head learning rate drops from 1e-3 to 1e-4. Evals add buggy/fixed pair accuracy and blocks-only bug location |
 | Oct 14, 2026 | Zero-shot baseline rerun on the cleaned test set (1,029), plus bug location read from Qwen's written answer: it says "none" almost everywhere. The bug_location baseline is now "always none" (acc 0.577, NLL 1.980) instead of a uniform guess, and the eval prints the buggy/no-bug split; `python -m jev.metrics` re-scores saved predictions |
 | Oct 14, 2026 | Phase 0 data skips files whose fix changes only comments or whitespace, and comment-only changes no longer count as bug locations. An i2c comment typo fix had been labeled a logic error. Test set: 1,045 → 1,029 examples; training: 933 → 910 |
 | Oct 14, 2026 | Zero-shot Qwen3-8B baseline recorded under Phase 2. Accuracy and top-3 give tied options equal credit, so a uniform guess scores chance, and any block the fix changes counts as the right location |

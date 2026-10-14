@@ -219,7 +219,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 NGPU=4 launch/eval.sh
 #    can only guess); a few minutes longer, output in runs/zeroshot-Qwen3-8B-lmpointer/
 CUDA_VISIBLE_DEVICES=0,1,2,3 NGPU=4 POINTER=lm launch/eval.sh
 
-# b) LoRA training (2 epochs, ~114 steps) plus evaluation, about 1 h on 4 cards
+# b) LoRA training (2 epochs, ~114 steps) plus evaluation, about 30 min on 4 cards
 CUDA_VISIBLE_DEVICES=0,1,2,3 NGPU=4 launch/train.sh
 ```
 
@@ -228,15 +228,15 @@ On 2 cards, use `CUDA_VISIBLE_DEVICES=0,1 NGPU=2` for both commands. The scripts
 | Output | Where |
 | --- | --- |
 | Zero-shot metrics | `runs/zeroshot-Qwen3-8B/eval.log`, `*.metrics.json` |
-| Training log | `runs/qwen3-8b-lora-v0/train.log` (loss, tok/s, peak memory, validation every 25 steps) |
-| Checkpoints | `runs/qwen3-8b-lora-v0/step-50/`, `step-100/`, `final/` (LoRA adapter + pointer head, ~0.7 GB each) |
-| Test metrics after training | `runs/qwen3-8b-lora-v0/eval.log`, `eval/*.metrics.json`, `eval/*.predictions.jsonl` |
+| Training log | `runs/qwen3-8b-lora-v1/train.log` (loss, tok/s, peak memory, validation every 25 steps) |
+| Checkpoints | `runs/qwen3-8b-lora-v1/step-50/`, `step-100/`, `final/` (LoRA adapter + pointer head, ~0.7 GB each) |
+| Test metrics after training | `runs/qwen3-8b-lora-v1/eval.log`, `eval/*.metrics.json`, `eval/*.predictions.jsonl` |
 
 What to expect:
 
 - **Zero-shot:** `bug_location` is exactly chance, because the pointer head starts uniform; the `POINTER=lm` run reads it from Qwen's own answer instead. `bug_present` and `bug_category` show what Qwen3-8B knows untrained.
-- **The bug_location lines:** the second line splits it. `buggy` = the files with a bug, where `acc` is how often it points at a block the fix changed. `no bug` = how often it says "none" on the other files. 58% of the test files have no bug, so answering "none" everywhere already scores 0.577 overall; the buggy-file numbers show whether it finds bugs. Chance on buggy files is acc 0.140, top-3 0.341.
-- **After training:** `bug_location` should clearly beat chance on the buggy files, and calibration (ECE, NLL) should improve.
+- **The extra lines:** under `bug_location`, `buggy` and `no bug` split the score. `buggy` = how often it points at a block the fix changed on files with a bug; `no bug` = how often it says "none" on the others. 58% of the test files have no bug, so answering "none" everywhere already scores 0.577 overall. `buggy, blocks only` ranks just the blocks on buggy files, so it measures finding the bug even when the model doubts there is one; chance is printed beside it. `pairs` (every hwe-bench question) is the share of buggy/fixed pairs where the buggy version gets the higher bug probability. 0.5 is chance; it is the most direct test of whether the model tells a bug from its fix.
+- **After training:** calibration (ECE, NLL) improves just by learning how often each answer is right. Learning more shows as `pairs` above 0.5 and `blocks only` above chance. The first LoRA run (v0, Oct 14, in `runs/qwen3-8b-lora-v0/`) clearly got the calibration part. The defaults now follow recipe v1, which trains a bug's buggy and fixed versions in the same step; the plan's Phase 2 results explain why.
 - **Detecting bugs in new projects:** don't expect a big jump in `bug_present` on the test projects. 174 OpenTitan bug fixes are too few for that; Phase 1's data is what fixes it.
 - **Memory:** peak memory should stay far below the cards' capacity. The `mem` column in the log shows it.
 
@@ -251,7 +251,7 @@ Paste these back to me when you're done, or at the first step that fails. For an
 - [ ] Output of `teacher.py check` and `teacher.py bench` (step 6)
 - [ ] `data/phase0/stats.json` (step 7)
 - [ ] `runs/smoke_gpu/train.log` and `runs/smoke_gpu/eval.log` (step 8)
-- [ ] `runs/zeroshot-Qwen3-8B/eval.log`, `runs/qwen3-8b-lora-v0/eval.log`, and `grep -E "^step|val @" runs/qwen3-8b-lora-v0/train.log` (step 9)
+- [ ] `runs/zeroshot-Qwen3-8B/eval.log`, `runs/qwen3-8b-lora-v1/eval.log`, and `grep -E "^step|val @" runs/qwen3-8b-lora-v1/train.log` (step 9)
 
 | Symptom | Likely cause and fix |
 | --- | --- |
