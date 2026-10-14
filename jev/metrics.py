@@ -91,9 +91,36 @@ def summarize(predictions):
             has_bug = [len(p["options"]) - 1 not in g for p, g in zip(ps, golds)]
             top3 = [topk_credit(p["probs"], g, 3) for p, g in zip(ps, golds)]
             m["top3_accuracy"] = float(np.mean(top3))
+            m["n_when_bug"] = sum(has_bug)
             m["accuracy_when_bug"] = float(np.mean([c for c, b in zip(correct, has_bug) if b])) if any(has_bug) else None
+            m["top3_when_bug"] = float(np.mean([c for c, b in zip(top3, has_bug) if b])) if any(has_bug) else None
             m["accuracy_when_none"] = (float(np.mean([c for c, b in zip(correct, has_bug) if not b]))
                                        if not all(has_bug) else None)
             m["mean_blocks"] = float(np.mean([len(p["options"]) - 1 for p in ps]))
         report[qid] = m
     return report
+
+
+def format_report(report):
+    """The printed form of summarize()'s report: one line per question, plus the buggy/no-bug split for pointers."""
+    lines = []
+    for qid, m in report.items():
+        extra = "".join(f"  {k} {m[k]:.3f}" for k in ("macro_f1", "auroc_yes", "top3_accuracy") if m.get(k) is not None)
+        lines.append(f"   {qid:18} n={m['n']:5}  acc {m['accuracy']:.3f}{extra}  nll {m['nll']:.3f}  ece {m['ece']:.3f}")
+        if m.get("n_when_bug"):  # a pointer: was the bug found, and was "none" said when there is none?
+            split = f"{'':18} buggy n={m['n_when_bug']:5}  acc {m['accuracy_when_bug']:.3f}  top3 {m['top3_when_bug']:.3f}"
+            if m["accuracy_when_none"] is not None:
+                split += f"   no bug n={m['n'] - m['n_when_bug']}  acc {m['accuracy_when_none']:.3f}"
+            lines.append("   " + split)
+    return lines
+
+
+if __name__ == "__main__":  # re-score saved predictions without a GPU: python -m jev.metrics <x.predictions.jsonl> ...
+    import json
+    import sys
+
+    for path in sys.argv[1:]:
+        with open(path) as fh:
+            print(f"== {path}")
+            print("\n".join(format_report(summarize([json.loads(line) for line in fh]))))
+

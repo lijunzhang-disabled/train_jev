@@ -4,6 +4,7 @@
         --data data/phase0/eval_hwe.jsonl data/phase0/eval_vb.jsonl --out runs/x/eval
 
 Writes <out>/<file stem>.predictions.jsonl and <out>/<file stem>.metrics.json, and prints the metrics.
+`python -m jev.metrics <out>/<file stem>.predictions.jsonl` prints them again from the saved predictions.
 
 --pointer-readout lm (eval only) answers pointer questions from the LM's own text instead of the pointer
 head, which is untrained, so exactly uniform, in a zero-shot run. That gives bug location a real zero-shot number.
@@ -18,7 +19,7 @@ import torch
 from jev import distributed
 from jev.data import JevDataset
 from jev.format import Renderer
-from jev.metrics import summarize
+from jev.metrics import format_report, summarize
 from jev.model import load_for_inference
 
 
@@ -113,11 +114,7 @@ def main():
             with open(os.path.join(args.out, f"{stem}.metrics.json"), "w") as fh:
                 json.dump(report, fh, indent=2)
             print(f"\n== {path}: {len(ds)} examples ({ds.dropped} too long), {time.time() - t0:.0f}s", flush=True)
-            for qid, m in report.items():
-                extra = "".join(f"  {k} {m[k]:.3f}" for k in ("macro_f1", "auroc_yes", "top3_accuracy")
-                                if m.get(k) is not None)
-                print(f"   {qid:18} n={m['n']:5}  acc {m['accuracy']:.3f}{extra}  nll {m['nll']:.3f}  "
-                      f"ece {m['ece']:.3f}", flush=True)
+            print("\n".join(format_report(report)), flush=True)
     distributed.cleanup()
 
 

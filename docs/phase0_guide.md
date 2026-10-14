@@ -235,7 +235,8 @@ On 2 cards, use `CUDA_VISIBLE_DEVICES=0,1 NGPU=2` for both commands. The scripts
 What to expect:
 
 - **Zero-shot:** `bug_location` is exactly chance, because the pointer head starts uniform; the `POINTER=lm` run reads it from Qwen's own answer instead. `bug_present` and `bug_category` show what Qwen3-8B knows untrained.
-- **After training:** `bug_location` should clearly beat chance, and calibration (ECE, NLL) should improve.
+- **The bug_location lines:** the second line splits it. `buggy` = the files with a bug, where `acc` is how often it points at a block the fix changed. `no bug` = how often it says "none" on the other files. 58% of the test files have no bug, so answering "none" everywhere already scores 0.577 overall; the buggy-file numbers show whether it finds bugs. Chance on buggy files is acc 0.140, top-3 0.341.
+- **After training:** `bug_location` should clearly beat chance on the buggy files, and calibration (ECE, NLL) should improve.
 - **Detecting bugs in new projects:** don't expect a big jump in `bug_present` on the test projects. 174 OpenTitan bug fixes are too few for that; Phase 1's data is what fixes it.
 - **Memory:** peak memory should stay far below the cards' capacity. The `mem` column in the log shows it.
 

@@ -196,16 +196,22 @@ Phase 2 ends with a table of baseline numbers that every later model must beat.
 - Zero-shot Qwen3-8B with the constrained readout
 - DeepSeek on a sample of the same questions; this sets a teacher ceiling and shows where the teacher is wrong
 
-**Results so far.** Zero-shot Qwen3-8B (Oct 14, 2026, 4 H20s) is no better than chance at telling buggy code from fixed code, or violated properties from holding ones, and it is overconfident: its log loss is 1.5–5× that of always predicting the label frequencies. The model has to beat both the base rate and these numbers.
+**Results so far.** Zero-shot Qwen3-8B (Oct 14, 2026, 4 H20s, cleaned test set) is no better than chance at telling buggy code from fixed code, or violated properties from holding ones, and it can't find bugs either. It is also overconfident: its log loss is 1.5–5× that of always predicting the label frequencies. The model has to beat both the base rate and these numbers.
 
 | Question | Test set | n | Base-rate acc | Base-rate NLL | Qwen3-8B acc | Macro-F1 | AUROC | NLL | ECE |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| bug_present (yes/no) | hwe-bench test | 1,045 | 0.576 | 0.682 | 0.533 | 0.500 | 0.484 | 2.846 | 0.392 |
-| bug_category (6 options) | hwe-bench test | 1,045 | 0.576 | 1.294 | 0.531 | 0.166 | | 1.971 | 0.241 |
-| bug_location (about 25 blocks + none) | hwe-bench test | 1,045 | 0.103 | 3.053 | 0.103 | | | 3.053 | 0.039 |
-| property_violated (yes/no) | verification-benchmarks | 119 | 0.731 | 0.582 | 0.286 | 0.237 | 0.445 | 2.823 | 0.663 |
+| bug_present (yes/no) | hwe-bench test | 1,029 | 0.577 | 0.681 | 0.526 | 0.493 | 0.484 | 2.837 | 0.402 |
+| bug_category (6 options) | hwe-bench test | 1,029 | 0.577 | 1.292 | 0.535 | 0.169 | | 1.973 | 0.240 |
+| bug_location (about 25 blocks + none), pointer head | hwe-bench test | 1,029 | 0.577 | 1.980 | 0.101 | | | 3.055 | 0.036 |
+| bug_location, read from Qwen's written answer | hwe-bench test | 1,029 | 0.577 | 1.980 | 0.577 | | | 6.276 | 0.421 |
+| property_violated (yes/no) | verification-benchmarks | 119 | 0.731 | 0.582 | 0.286 | 0.237 | 0.449 | 2.820 | 0.662 |
 
-Base rate = always answering the most common label (acc) or predicting the label frequencies (NLL); for bug_location it is a uniform guess, which is also what the untrained pointer head does (top-3 chance 0.266). Pointing at any block the fix changes counts as correct, since 61% of the bugs span several blocks. The eval printed 0.033 and 0.607 for bug_location because ties went to fixed positions and only the first changed block counted; both are fixed. `POINTER=lm launch/eval.sh` gives a real zero-shot bug_location number from the block number Qwen would write (not run yet). These numbers come from the first build of the test set (1,045 examples). The cleaned build has 1,029, so the next eval run replaces them.
+Base rate = always answering the most common label (acc) or predicting the label frequencies (NLL). For bug_location the most common answer is "none" (594 of the 1,029 files have no bug), and the NLL baseline says "none" with that probability and spreads the rest evenly over the blocks. Pointing at any block the fix changes counts as correct, since 61% of the bugs span several blocks.
+
+- **Pointer head:** untrained, so exactly uniform: top-3 0.262; on the 435 buggy files, acc 0.140 and top-3 0.341.
+- **Qwen's written answer** (`POINTER=lm`, the block number or "none" Qwen would write after "Q3:"): the 0.577 is the share of files without a bug, so Qwen almost certainly answers "none" on nearly every file. Its top-3 is 0.723 against 0.689 for the baseline. Its NLL is 3× the baseline's because it is confidently wrong on the buggy files. Its Q1 answer meanwhile says "yes" on roughly a third of the files, so its answers contradict each other. The eval log now prints a buggy/no-bug split under bug_location; `python -m jev.metrics runs/zeroshot-Qwen3-8B-lmpointer/eval_hwe.predictions.jsonl` prints it from the saved predictions.
+- **Rerun noise:** the two runs' other numbers differ in the third decimal (one or two near-ties flipping in bf16 on the GPU).
+- **First build:** on the 1,045-example test set the numbers were within 0.01 of these.
 
 ## Phase 3: SFT v1 (week 3)
 
@@ -287,6 +293,7 @@ Five questions are open. The most important is which question types make up v1.
 
 | Date | Decision |
 | --- | --- |
+| Oct 14, 2026 | Zero-shot baseline rerun on the cleaned test set (1,029), plus bug location read from Qwen's written answer: it says "none" almost everywhere. The bug_location baseline is now "always none" (acc 0.577, NLL 1.980) instead of a uniform guess, and the eval prints the buggy/no-bug split; `python -m jev.metrics` re-scores saved predictions |
 | Oct 14, 2026 | Phase 0 data skips files whose fix changes only comments or whitespace, and comment-only changes no longer count as bug locations. An i2c comment typo fix had been labeled a logic error. Test set: 1,045 → 1,029 examples; training: 933 → 910 |
 | Oct 14, 2026 | Zero-shot Qwen3-8B baseline recorded under Phase 2. Accuracy and top-3 give tied options equal credit, so a uniform guess scores chance, and any block the fix changes counts as the right location |
 | Oct 13, 2026 | Models come from ModelScope into `models/`, because the server's proxy times out on Hugging Face. Its Qwen3 files are byte-identical to Hugging Face's |
