@@ -259,7 +259,7 @@ Paste these back to me when you're done, or at the first step that fails. For an
 | `download_models.sh` fails, or `ProxyError: 504 Gateway Time-out` | The proxy can't reach the download site. Bypass the proxy or switch the source (step 4); re-running resumes |
 | `CERTIFICATE_VERIFY_FAILED`, `self-signed certificate in certificate chain` | The proxy inspects HTTPS. Point Python at the system certificates (step 4) |
 | `models/Qwen3-8B not found` | Step 4 didn't finish, or the command isn't running from the repo root |
-| `build_benchmarks.py` reports download failures | GitHub rate limit or a network blip. Rerun it; files already downloaded are skipped |
+| `build_benchmarks.py` reports download failures | A proxy timeout (`HTTP 504` under `hwe_download_errors`), a GitHub rate limit or a network blip. Rerun it: it downloads only the missing files. If they keep failing, add `--workers 4` |
 | The OSS CAD Suite download is slow or keeps breaking | Rerun `install_oss_cad_suite.sh`; it resumes. Try `CONNECTIONS=16`, or copy the `.tgz` in from another machine (step 5) |
 | `formal smoke test: FAILED` | Usually `PATH` lacks `oss-cad-suite/bin`. The script prints the path of `sby.log` |
 | `teacher.py`: `cannot reach ...` | Wrong URL (it usually needs `/v1`), the server is down, or a firewall is in the way |

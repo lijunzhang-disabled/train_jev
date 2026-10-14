@@ -34,6 +34,7 @@ Record fields
 import argparse
 import collections
 import concurrent.futures
+import http.client
 import json
 import os
 import re
@@ -268,10 +269,14 @@ def apply_hunks(old_text, hunks):
     return "\n".join(out), ranges, max_offset
 
 
-def fetch(url, dest, retries=3):
+def fetch(url, dest, retries=5):
+    """Download url to dest. Returns None on success, else the last error, e.g. "HTTP 504"."""
     if os.path.exists(dest):
-        return True
+        return None
+    err = None
     for attempt in range(retries):
+        if attempt:
+            time.sleep(2 ** attempt)  # 2, 4, 8, 16 s: proxies and rate limits need time to recover
         try:
             with urllib.request.urlopen(url, timeout=60) as resp:
                 data = resp.read()
@@ -279,14 +284,14 @@ def fetch(url, dest, retries=3):
             with open(dest + ".part", "wb") as fh:
                 fh.write(data)
             os.replace(dest + ".part", dest)
-            return True
+            return None
         except urllib.error.HTTPError as e:
+            err = f"HTTP {e.code}"
             if e.code == 404:
-                return False
-            time.sleep(2 ** attempt)
-        except (urllib.error.URLError, TimeoutError):
-            time.sleep(2 ** attempt)
-    return False
+                return err
+        except (OSError, http.client.HTTPException) as e:  # URLError, timeouts, dropped connections
+            err = str(getattr(e, "reason", e))[:80] or type(e).__name__
+    return err
 
 
 def hwe_records(workers, offline):
@@ -309,13 +314,13 @@ def hwe_records(workers, offline):
 
     missing = [p for p in jobs if not os.path.exists(p)]
     print(f"hwe-bench: {len(cases)} SystemVerilog bug fixes, {len(jobs)} RTL files, {len(missing)} to download")
-    failed = set()
+    errors = collections.Counter()
     if missing and not offline:
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            for path, ok in zip(missing, pool.map(lambda p: fetch(jobs[p], p), missing)):
-                if not ok:
-                    failed.add(path)
-    failed |= {p for p in jobs if not os.path.exists(p)}
+            for err in pool.map(lambda p: fetch(jobs[p], p), missing):
+                if err:
+                    errors[err] += 1
+    failed = {p for p in jobs if not os.path.exists(p)}
 
     records, apply_errors, test_touched, offsets = [], [], set(), []
     for c, files in plan:
@@ -353,7 +358,7 @@ def hwe_records(workers, offline):
             "fix_patch": c["fix_patch"],
             "created_at": c["created_at"],
         })
-    return records, sorted(failed), apply_errors, test_touched, offsets
+    return records, sorted(failed), dict(errors.most_common()), apply_errors, test_touched, offsets
 
 
 # ---------------------------------------------------------------- main
@@ -369,7 +374,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
 
     vb = vb_records()
-    hwe, failed, apply_errors, touched, offsets = hwe_records(args.workers, args.offline)
+    hwe, failed, download_errors, apply_errors, touched, offsets = hwe_records(args.workers, args.offline)
     records = vb + hwe
 
     with open(os.path.join(OUT, "benchmarks.jsonl"), "w", encoding="utf-8") as fh:
@@ -404,6 +409,7 @@ def main():
         "hwe_files_applied_at_offset": {"count": len(offsets), "max_lines": max(offsets, default=0)},
         "hwe_records_without_rtl": [r["id"] for r in hwe if not r["rtl"]],
         "hwe_download_failures": [rel(p) for p in failed],
+        "hwe_download_errors": download_errors,
         "hwe_apply_errors": apply_errors,
         "test_exclusion_files": len(touched),
     }
@@ -413,6 +419,9 @@ def main():
     for k in ("hwe_download_failures", "hwe_apply_errors"):
         if len(summary[k]) >= 8:
             print(f"{k}: {len(summary[k])} (see summary.json)")
+    if failed:
+        print(f"\n{len(failed)} RTL files are missing, so those records are incomplete. Rerun this script: "
+              "it downloads only the missing files.\nIf they keep failing, try --workers 4.")
 
 
 if __name__ == "__main__":
