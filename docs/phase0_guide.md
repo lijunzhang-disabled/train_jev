@@ -215,6 +215,9 @@ First measure what Qwen3-8B does with no training, then train LoRA on the 933 Ph
 ```bash
 # a) zero-shot baseline, about 10-15 min on 4 cards
 CUDA_VISIBLE_DEVICES=0,1,2,3 NGPU=4 launch/eval.sh
+#    the same, but bug location is read from the block number Qwen would write (the untrained pointer head
+#    can only guess); a few minutes longer, output in runs/zeroshot-Qwen3-8B-lmpointer/
+CUDA_VISIBLE_DEVICES=0,1,2,3 NGPU=4 POINTER=lm launch/eval.sh
 
 # b) LoRA training (2 epochs, ~116 steps) plus evaluation, about 1 h on 4 cards
 CUDA_VISIBLE_DEVICES=0,1,2,3 NGPU=4 launch/train.sh
@@ -231,7 +234,7 @@ On 2 cards, use `CUDA_VISIBLE_DEVICES=0,1 NGPU=2` for both commands. The scripts
 
 What to expect:
 
-- **Zero-shot:** `bug_location` is exactly chance, because the pointer head starts uniform. `bug_present` and `bug_category` show what Qwen3-8B knows untrained.
+- **Zero-shot:** `bug_location` is exactly chance, because the pointer head starts uniform; the `POINTER=lm` run reads it from Qwen's own answer instead. `bug_present` and `bug_category` show what Qwen3-8B knows untrained.
 - **After training:** `bug_location` should clearly beat chance, and calibration (ECE, NLL) should improve.
 - **Detecting bugs in new projects:** don't expect a big jump in `bug_present` on the test projects. 174 OpenTitan bug fixes are too few for that; Phase 1's data is what fixes it.
 - **Memory:** peak memory should stay far below the cards' capacity. The `mem` column in the log shows it.
@@ -295,5 +298,6 @@ Launch scripts take their settings from environment variables:
 | `EPOCHS`, `LR`, `SEQ_PER_STEP` | Training length, LoRA learning rate, sequences per optimizer step | 2, 1e-4, 16 |
 | `MAX_SEQ` | Token limit; must match the data build | 8192 |
 | `CHECKPOINT` | Checkpoint for `eval.sh` (unset = zero-shot) | unset |
+| `POINTER` | How `eval.sh` answers bug location: `head` (pointer head) or `lm` (the block number Qwen would write) | `head` |
 | `EXTRA` | Extra `jev.train` flags, e.g. `EXTRA="--max-steps 10"` | empty |
 | `PYTHON` | Python to use | `python` |

@@ -202,10 +202,10 @@ Phase 2 ends with a table of baseline numbers that every later model must beat.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | bug_present (yes/no) | hwe-bench test | 1,045 | 0.576 | 0.682 | 0.533 | 0.500 | 0.484 | 2.846 | 0.392 |
 | bug_category (6 options) | hwe-bench test | 1,045 | 0.576 | 1.294 | 0.531 | 0.166 | | 1.971 | 0.241 |
-| bug_location (about 25 blocks + none) | hwe-bench test | 1,045 | 0.064 | 3.053 | 0.064 | | | 3.053 | 0.000 |
+| bug_location (about 25 blocks + none) | hwe-bench test | 1,045 | 0.103 | 3.053 | 0.103 | | | 3.053 | 0.039 |
 | property_violated (yes/no) | verification-benchmarks | 119 | 0.731 | 0.582 | 0.286 | 0.237 | 0.445 | 2.823 | 0.663 |
 
-Base rate = always answering the most common label (acc) or predicting the label frequencies (NLL); for bug_location it is a uniform guess, which is also what the untrained pointer head does (top-3 chance 0.186). The eval printed 0.033 and 0.607 for bug_location because ties went to fixed positions; accuracy and top-3 now give tied options equal credit.
+Base rate = always answering the most common label (acc) or predicting the label frequencies (NLL); for bug_location it is a uniform guess, which is also what the untrained pointer head does (top-3 chance 0.266). Pointing at any block the fix changes counts as correct, since 61% of the bugs span several blocks. The eval printed 0.033 and 0.607 for bug_location because ties went to fixed positions and only the first changed block counted; both are fixed. `POINTER=lm launch/eval.sh` gives a real zero-shot bug_location number from the block number Qwen would write (not run yet).
 
 ## Phase 3: SFT v1 (week 3)
 
@@ -287,7 +287,7 @@ Five questions are open. The most important is which question types make up v1.
 
 | Date | Decision |
 | --- | --- |
-| Oct 14, 2026 | Zero-shot Qwen3-8B baseline recorded under Phase 2. Accuracy and top-3 give tied options equal credit, so a uniform guess scores chance |
+| Oct 14, 2026 | Zero-shot Qwen3-8B baseline recorded under Phase 2. Accuracy and top-3 give tied options equal credit, so a uniform guess scores chance, and any block the fix changes counts as the right location |
 | Oct 13, 2026 | Models come from ModelScope into `models/`, because the server's proxy times out on Hugging Face. Its Qwen3 files are byte-identical to Hugging Face's |
 | Oct 12, 2026 | Phase 0 code written and tested on CPU; the server steps are in the Phase 0 Setup Guide |
 | Oct 12, 2026 | flash-attn dropped; PyTorch's SDPA attention is enough on H20 |

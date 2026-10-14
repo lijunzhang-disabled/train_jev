@@ -1,5 +1,6 @@
 """Accuracy and calibration metrics over predictions, grouped by question id. Numpy only."""
 import collections
+import math
 
 import numpy as np
 
@@ -36,12 +37,16 @@ def ece(confidence, correct, bins=15):
 
 
 def topk_credit(probs, gold, k):
-    """Chance that the gold option is among the top k when ties are broken at random
-    (an exactly uniform prediction scores chance, not whatever argmax/argsort happen to pick)."""
+    """Chance that at least one gold option is among the top k when ties are broken at random
+    (an exactly uniform prediction scores chance, not whatever argmax/argsort happen to pick).
+    gold: indices of the correct options; a bug fix can span several blocks, and any of them counts."""
     probs = np.asarray(probs)
-    above = int((probs > probs[gold]).sum())
-    tied = int((probs == probs[gold]).sum())
-    return min(max(k - above, 0), tied) / tied
+    best = probs[gold].max()
+    above = int((probs > best).sum())
+    tied = int((probs == best).sum())
+    tied_gold = int((probs[gold] == best).sum())
+    slots = min(max(k - above, 0), tied)
+    return 1 - math.comb(tied - tied_gold, slots) / math.comb(tied, slots)
 
 
 def macro_f1(pred, gold, classes):
@@ -65,8 +70,9 @@ def summarize(predictions):
     for qid, ps in sorted(by_q.items()):
         pred = [int(np.argmax(p["probs"])) for p in ps]
         gold = [int(np.argmax(p["target"])) for p in ps]
+        golds = [np.flatnonzero(np.isclose(p["target"], max(p["target"]))) for p in ps]  # every top-weight option
         conf = [float(np.max(p["probs"])) for p in ps]
-        correct = [topk_credit(p["probs"], g, 1) for p, g in zip(ps, gold)]
+        correct = [topk_credit(p["probs"], g, 1) for p, g in zip(ps, golds)]
         m = {
             "n": len(ps),
             "accuracy": float(np.mean(correct)),
@@ -82,8 +88,8 @@ def summarize(predictions):
             if ps[0]["options"][:2] == ["yes", "no"]:
                 m["auroc_yes"] = auroc([p["probs"][0] for p in ps], [g == 0 for g in gold])
         else:  # pointer: last option is "none"
-            has_bug = [g != len(p["options"]) - 1 for p, g in zip(ps, gold)]
-            top3 = [topk_credit(p["probs"], g, 3) for p, g in zip(ps, gold)]
+            has_bug = [len(p["options"]) - 1 not in g for p, g in zip(ps, golds)]
+            top3 = [topk_credit(p["probs"], g, 3) for p, g in zip(ps, golds)]
             m["top3_accuracy"] = float(np.mean(top3))
             m["accuracy_when_bug"] = float(np.mean([c for c, b in zip(correct, has_bug) if b])) if any(has_bug) else None
             m["accuracy_when_none"] = (float(np.mean([c for c, b in zip(correct, has_bug) if not b]))

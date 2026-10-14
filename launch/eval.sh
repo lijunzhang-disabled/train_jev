@@ -2,6 +2,7 @@
 # Evaluate a checkpoint on both test sets, or the base model zero-shot when CHECKPOINT is unset.
 #
 #   NGPU=4 launch/eval.sh                                                   # zero-shot Qwen3-8B baseline
+#   NGPU=4 POINTER=lm launch/eval.sh       # zero-shot, bug location read from the LM's text answer
 #   NGPU=4 CHECKPOINT=runs/qwen3-8b-lora-v0/final OUT=runs/qwen3-8b-lora-v0/eval launch/eval.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -13,12 +14,15 @@ NGPU=${NGPU:-4}
 MODEL=${MODEL:-models/Qwen3-8B}   # from tools/download_models.sh
 DATA=${DATA:-data/phase0}
 CHECKPOINT=${CHECKPOINT:-}
-OUT=${OUT:-runs/zeroshot-$(basename "$MODEL")}
+POINTER=${POINTER:-head}   # head | lm (see jev/eval.py)
+suffix=; [ "$POINTER" = lm ] && suffix=-lmpointer
+OUT=${OUT:-runs/zeroshot-$(basename "$MODEL")$suffix}
 MAX_SEQ=${MAX_SEQ:-8192}
 LIMIT=${LIMIT:-}
 
 [ -d "$MODEL" ] || [[ "$MODEL" != models/* ]] || { echo "$MODEL not found: run tools/download_models.sh" >&2; exit 1; }
-args=(--model "$MODEL" --max-seq-tokens "$MAX_SEQ" --data "$DATA/eval_hwe.jsonl" "$DATA/eval_vb.jsonl" --out "$OUT")
+args=(--model "$MODEL" --max-seq-tokens "$MAX_SEQ" --data "$DATA/eval_hwe.jsonl" "$DATA/eval_vb.jsonl" --out "$OUT"
+      --pointer-readout "$POINTER")
 [ -n "$CHECKPOINT" ] && args+=(--checkpoint "$CHECKPOINT")
 [ -n "$LIMIT" ] && args+=(--limit "$LIMIT")
 mkdir -p "$OUT"
