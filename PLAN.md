@@ -113,6 +113,8 @@ Demoted after inspection: shailja/Verilog_GitHub (not actually deduplicated, and
 
 **Phase 0 training data is small.** It comes from 174 OpenTitan bug fixes: 910 examples, about 4.0M tokens at an 8k window. That's enough to prove the pipeline end to end, but it's about 2% of Phase 1's ~40k-item target, all from one project. Phase 1 scales it with the sources above, more mined OpenTitan fixes (2,594 merged "fix" PRs before 2024), and our own mutants. Real files are also long: 27% of the hwe-bench training files exceed 8k tokens, and the largest is 182k. So each example is a window placed at a random offset, which keeps the bug's position in the window from giving away its location.
 
+**How we get more data** is in [Getting More Training Data](https://claude.ai/code/artifact/b54b90ea-0107-49a4-832c-ede95609c6cd) (git copy `docs/getting_more_data.md`). It covers how much data other Jev-like models used (Kev-9B: about 30k examples), each data source with its yield and label quality, how hardware CWEs fit in, and the staged targets.
+
 ## Workflow
 
 I write and test all code on the dev box. You copy it to the server, run it, and paste back logs. The data pipeline has to run somewhere that can reach DeepSeek, because the dev box can't.
@@ -318,6 +320,7 @@ Five questions are open. The most important is which question types make up v1.
 
 | Date | Decision |
 | --- | --- |
+| Oct 14, 2026 | Data plan written ([Getting More Training Data](https://claude.ai/code/artifact/b54b90ea-0107-49a4-832c-ede95609c6cd)). Labeled bugs, not tokens, limit us: 174 distinct bugs vs about 30k examples for Kev-9B. Hardware CWEs become the label set and the recipes for injected security bugs, not training examples: 25 of the 34 CWEs with Verilog code quote test-family designs. Next: a 1,000-module mutant pilot, then a 30k slice of module-level examples (~1,500 tokens) |
 | Oct 14, 2026 | LoRA v0 learned only the base rates. v1 recipe: whole fixes are shuffled, so a buggy file and its fix train in the same step (`--shuffle group`), and the pointer head learning rate drops from 1e-3 to 1e-4. Evals add buggy/fixed pair accuracy and blocks-only bug location |
 | Oct 14, 2026 | Zero-shot baseline rerun on the cleaned test set (1,029), plus bug location read from Qwen's written answer: it says "none" almost everywhere. The bug_location baseline is now "always none" (acc 0.577, NLL 1.980) instead of a uniform guess, and the eval prints the buggy/no-bug split; `python -m jev.metrics` re-scores saved predictions |
 | Oct 14, 2026 | Phase 0 data skips files whose fix changes only comments or whitespace, and comment-only changes no longer count as bug locations. An i2c comment typo fix had been labeled a logic error. Test set: 1,045 → 1,029 examples; training: 933 → 910 |
