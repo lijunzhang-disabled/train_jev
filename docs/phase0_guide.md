@@ -174,7 +174,7 @@ python tools/build_phase0_data.py --tokenizer models/Qwen3-8B --max-seq-tokens 8
 
 Each hwe-bench bug fix yields three kinds of examples per changed file:
 
-- **buggy:** a window around the bug, at a random offset.
+- **buggy:** a window around the bug, at a random offset. Files whose fix changes only comments or whitespace are skipped, and comment-only changes don't count as bug locations.
 - **fixed:** the same window after the fix.
 - **elsewhere:** a window of the buggy file away from the fix, weighted 0.5.
 
@@ -184,9 +184,9 @@ Your counts should match mine exactly. The pinned inputs are deterministic, and 
 
 | File | Examples | Bug fixes / properties | Use |
 | --- | --- | --- | --- |
-| `train.jsonl` | 933 | 174 | training |
-| `val.jsonl` | 115 | 16 | validation during training |
-| `eval_hwe.jsonl` | 1,045 | 124 | hwe-bench test |
+| `train.jsonl` | 910 | 174 | training |
+| `val.jsonl` | 113 | 16 | validation during training |
+| `eval_hwe.jsonl` | 1,029 | 124 | hwe-bench test |
 | `eval_vb.jsonl` | 119 | 119 | verification-benchmarks test |
 
 **Check:** `data/phase0/stats.json` shows these counts, and `tokens_max` stays under 8,192.
@@ -210,7 +210,7 @@ The log prints lines like `step 10/20  loss 1.9  lr ...  tok/s ...  mem ...G`, t
 
 ## Step 9: First real run: zero-shot baseline, then Qwen3-8B LoRA
 
-First measure what Qwen3-8B does with no training, then train LoRA on the 933 Phase 0 examples and evaluate again on the same test sets. The comparison is the first real result.
+First measure what Qwen3-8B does with no training, then train LoRA on the 910 Phase 0 examples and evaluate again on the same test sets. The comparison is the first real result.
 
 ```bash
 # a) zero-shot baseline, about 10-15 min on 4 cards
@@ -219,7 +219,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 NGPU=4 launch/eval.sh
 #    can only guess); a few minutes longer, output in runs/zeroshot-Qwen3-8B-lmpointer/
 CUDA_VISIBLE_DEVICES=0,1,2,3 NGPU=4 POINTER=lm launch/eval.sh
 
-# b) LoRA training (2 epochs, ~116 steps) plus evaluation, about 1 h on 4 cards
+# b) LoRA training (2 epochs, ~114 steps) plus evaluation, about 1 h on 4 cards
 CUDA_VISIBLE_DEVICES=0,1,2,3 NGPU=4 launch/train.sh
 ```
 

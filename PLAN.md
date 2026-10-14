@@ -111,7 +111,7 @@ hwe-bench's 86 Chisel cases (XiangShan, rocket-chip) are out of scope for v1, be
 
 Demoted after inspection: shailja/Verilog_GitHub (not actually deduplicated, and it contains OR1200 code), HPAI-BSC/SystemVerilog-RL-12k (its mutants are gate-level netlists), and TroLL (gate-level Trojans whose net names leak the label). The full survey, including datasets built from the test families that must never be trained on, is in `docs/hf_dataset_survey.md`.
 
-**Phase 0 training data is small.** It comes from 174 OpenTitan bug fixes: 933 examples, about 4.1M tokens at an 8k window. That's enough to prove the pipeline end to end, but it's about 2% of Phase 1's ~40k-item target, all from one project. Phase 1 scales it with the sources above, more mined OpenTitan fixes (2,594 merged "fix" PRs before 2024), and our own mutants. Real files are also long: 27% of the hwe-bench training files exceed 8k tokens, and the largest is 182k. So each example is a window placed at a random offset, which keeps the bug's position in the window from giving away its location.
+**Phase 0 training data is small.** It comes from 174 OpenTitan bug fixes: 910 examples, about 4.0M tokens at an 8k window. That's enough to prove the pipeline end to end, but it's about 2% of Phase 1's ~40k-item target, all from one project. Phase 1 scales it with the sources above, more mined OpenTitan fixes (2,594 merged "fix" PRs before 2024), and our own mutants. Real files are also long: 27% of the hwe-bench training files exceed 8k tokens, and the largest is 182k. So each example is a window placed at a random offset, which keeps the bug's position in the window from giving away its location.
 
 ## Workflow
 
@@ -205,7 +205,7 @@ Phase 2 ends with a table of baseline numbers that every later model must beat.
 | bug_location (about 25 blocks + none) | hwe-bench test | 1,045 | 0.103 | 3.053 | 0.103 | | | 3.053 | 0.039 |
 | property_violated (yes/no) | verification-benchmarks | 119 | 0.731 | 0.582 | 0.286 | 0.237 | 0.445 | 2.823 | 0.663 |
 
-Base rate = always answering the most common label (acc) or predicting the label frequencies (NLL); for bug_location it is a uniform guess, which is also what the untrained pointer head does (top-3 chance 0.266). Pointing at any block the fix changes counts as correct, since 61% of the bugs span several blocks. The eval printed 0.033 and 0.607 for bug_location because ties went to fixed positions and only the first changed block counted; both are fixed. `POINTER=lm launch/eval.sh` gives a real zero-shot bug_location number from the block number Qwen would write (not run yet).
+Base rate = always answering the most common label (acc) or predicting the label frequencies (NLL); for bug_location it is a uniform guess, which is also what the untrained pointer head does (top-3 chance 0.266). Pointing at any block the fix changes counts as correct, since 61% of the bugs span several blocks. The eval printed 0.033 and 0.607 for bug_location because ties went to fixed positions and only the first changed block counted; both are fixed. `POINTER=lm launch/eval.sh` gives a real zero-shot bug_location number from the block number Qwen would write (not run yet). These numbers come from the first build of the test set (1,045 examples). The cleaned build has 1,029, so the next eval run replaces them.
 
 ## Phase 3: SFT v1 (week 3)
 
@@ -287,6 +287,7 @@ Five questions are open. The most important is which question types make up v1.
 
 | Date | Decision |
 | --- | --- |
+| Oct 14, 2026 | Phase 0 data skips files whose fix changes only comments or whitespace, and comment-only changes no longer count as bug locations. An i2c comment typo fix had been labeled a logic error. Test set: 1,045 → 1,029 examples; training: 933 → 910 |
 | Oct 14, 2026 | Zero-shot Qwen3-8B baseline recorded under Phase 2. Accuracy and top-3 give tied options equal credit, so a uniform guess scores chance, and any block the fix changes counts as the right location |
 | Oct 13, 2026 | Models come from ModelScope into `models/`, because the server's proxy times out on Hugging Face. Its Qwen3 files are byte-identical to Hugging Face's |
 | Oct 12, 2026 | Phase 0 code written and tested on CPU; the server steps are in the Phase 0 Setup Guide |

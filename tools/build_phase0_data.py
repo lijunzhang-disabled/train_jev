@@ -6,9 +6,11 @@
 Needs `transformers` for the tokenizer. Writes train.jsonl, val.jsonl, eval_hwe.jsonl, eval_vb.jsonl and
 stats.json. Every example is rendered with jev/format.py to check that it fits in --max-seq-tokens.
 
-Per changed RTL file of a hwe-bench bug fix (generated "autogen" copies are skipped):
+Per changed RTL file of a hwe-bench bug fix (generated "autogen" copies are skipped, and so are files
+whose code the fix doesn't change: only comments or whitespace differ):
   buggy      a window of the buggy file containing a changed region, placed at a random offset so the
-             bug's position in the window carries no signal
+             bug's position in the window carries no signal. Regions that only touch comments or
+             whitespace don't count as bug locations
   fixed      the matching window of the fixed file
   elsewhere  a window of the buggy file away from every changed region (weight 0.5: "no bug" there is
              likely but not certain)
@@ -121,6 +123,40 @@ def line_map(old, new):
     return mapping
 
 
+CODE_OR_COMMENT = re.compile(r'"(?:\\.|[^"\\\n])*"|//[^\n]*|/\*.*?\*/', re.S)
+
+
+def code_only(lines):
+    """The lines with comments blanked out (strings kept), so line numbers stay the same."""
+    def blank(m):
+        return m.group() if m.group().startswith('"') else "\n" * m.group().count("\n")
+    return CODE_OR_COMMENT.sub(blank, "\n".join(lines)).split("\n")
+
+
+def code_regions(buggy, fixed):
+    """Line ranges of the buggy file where the code changes once comments and whitespace are ignored,
+    in the format of build_benchmarks.py's changed_lines (a pure insertion spans the lines around it)."""
+    def norm(lines):
+        return [(k, " ".join(line.split())) for k, line in enumerate(code_only(lines), 1) if line.strip()]
+    old, new = norm(buggy), norm(fixed)
+    regions = []
+    matcher = difflib.SequenceMatcher(None, [t for _, t in old], [t for _, t in new], autojunk=False)
+    for tag, i1, i2, _, _ in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if i2 > i1:
+            regions.append((old[i1][0], old[i2 - 1][0]))
+        else:
+            regions.append((old[i1 - 1][0] if i1 else 1, old[i1][0] if i1 < len(old) else len(buggy)))
+    return regions
+
+
+def same_code(buggy, fixed):
+    def tokens(lines):
+        return re.findall(r"\w+|\S", "\n".join(code_only(lines)))
+    return tokens(buggy) == tokens(fixed)
+
+
 def hwe_examples(record, windower, block_lines, rng, stats):
     group = record["id"]
     category = CATEGORIES[record["bug"]["category"]]
@@ -133,7 +169,13 @@ def hwe_examples(record, windower, block_lines, rng, stats):
             stats["skipped files without a fix"] += 1
             continue
         buggy, fixed = read_lines(f["buggy"]), read_lines(f["fixed"])
-        regions = f["changed_lines"]
+        if same_code(buggy, fixed):
+            stats["skipped files whose fix changes only comments or whitespace"] += 1
+            continue
+        code = code_regions(buggy, fixed)
+        regions = [(a, b) for a, b in f["changed_lines"] if any(a <= cb and ca <= b for ca, cb in code)]
+        stats["comment-only changed regions dropped"] += len(f["changed_lines"]) - len(regions)
+        regions = regions or f["changed_lines"]  # only reformatting: keep every changed region
         prefix = windower.line_costs(buggy)
         a, b = rng.choice(regions)
         win = windower.containing(prefix, len(buggy), a, b, rng)
