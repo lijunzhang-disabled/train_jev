@@ -217,7 +217,7 @@ Base rate = always answering the most common label (acc) or predicting the label
 - **Rerun noise:** the two runs' other numbers differ in the third decimal (one or two near-ties flipping in bf16 on the GPU).
 - **First build:** on the 1,045-example test set the numbers were within 0.01 of these.
 
-**LoRA v0** (Oct 14, 2026: 910 training examples, 2 epochs = 114 steps, 26 min on 4 H20s, 24 GB peak per card) learned how often each answer is right, and almost nothing else. It gives every test file the majority answer ("no", "no bug", "none"), and its log loss matches the base rate's. Validation accuracy equals the validation majority (0.540) at every checkpoint. Training loss ended near 1.3, against 1.40 for predicting the label frequencies.
+**LoRA v0** (Oct 14, 2026: 910 training examples, 2 epochs = 114 steps, 26 min on 4 H20s, 24 GB peak per card) learned how often each answer is right, and almost nothing else. It gives every test file the majority answer ("no", "no bug", "none"), and its log loss matches the base rate's. Validation accuracy equals the validation majority (0.540) at every checkpoint. Training loss ended near 1.3, against 1.36 for predicting the label frequencies.
 
 | Question | Base-rate NLL | Zero-shot NLL | LoRA v0 NLL | LoRA v0 ECE | LoRA v0 acc | LoRA v0 AUROC |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -237,6 +237,23 @@ Base rate = always answering the most common label (acc) or predicting the label
 - **Twins in the same step move the right way:** at the real 1e-4, with all 8 examples in every step, the buggy version got the higher bug probability in all 3 pairs by step 5. Log loss was still at the base rate; the test stopped at step 5 to spare the shared CPU.
 
 LoRA v1 therefore shuffles whole fixes instead of single examples (`--shuffle group`, now the default), so a fix's buggy, fixed and elsewhere versions train in the same step. It also lowers the pointer head's learning rate from 1e-3 to 1e-4. Adam moves every weight by about the learning rate per step, and the head reads 4,096-wide inputs, so 1e-3 could swing pointer logits by tens in one step; v0's validation loss for bug location bounced between 2.10 and 2.33.
+
+**LoRA v1** (Oct 14, 2026: same data and step count, 25 min) didn't get past the base rates either. Its training loss in the second epoch averaged 1.34, against 1.36 for predicting the label frequencies and 1.35 for a rerun of v0. It can't tell a bug from its fix. On the 435 hwe-bench pairs, the buggy version looks buggier 47–53% of the time. On validation's 52 pairs the figure moved between 0.44 and 0.62, which is within noise.
+
+| Question | Base-rate NLL | LoRA v0 NLL | LoRA v1 NLL | LoRA v1 ECE | LoRA v1 AUROC | LoRA v1 pairs |
+| --- | --- | --- | --- | --- | --- | --- |
+| bug_present | 0.681 | 0.679 | 0.690 | 0.061 | 0.567 | 0.474 |
+| bug_category | 1.292 | 1.320 | 1.324 | 0.052 | | 0.513 |
+| bug_location | 1.980 | 1.956 | 1.947 | 0.039 | | 0.526 |
+| property_violated | 0.582 | 0.744 | 0.838 | 0.351 | 0.413 | |
+
+- **One real gain: ranking blocks.** On buggy files, v1's top block is one the fix changed 23.0% of the time (top-3: 45.5%), against 15.0% (35.9%) for chance. Simple layout rules don't explain it: picking the longest block scores 14.7%, the last block 11.0%, the first 8.3%. So the model learned where in a file bugs tend to sit, but not whether this version has one.
+- **Run-to-run noise is large.** A rerun of v0 with the same recipe gave bug_present AUROC 0.545 instead of 0.528, and property_violated AUROC 0.441 instead of 0.298. Differences of a few hundredths between single runs mean little.
+- **Fixed after v1:** an "elsewhere" example's 0.5 weight had no effect. The loss divided by the micro-batch's summed weights, and each micro-batch holds one example. These examples now count half, as intended.
+
+**Memorization run** (Oct 15, 2026: the first 64 training examples, 13 bugs, 20 epochs = 80 steps, 16 min on 4 H20s, validated on the same 64): the setup can fit. Training loss fell from 1.85 to 0.27, against 1.28 for these examples' label frequencies. On those examples accuracy reached 0.94–0.97, and the buggy version looked buggier in 27 or all 28 pairs. After 2 epochs, v1's length, loss was still at the base rate; it only fell below from about epoch 5. So v1 stopped too early to say whether 174 bugs are enough.
+
+**Next:** v1 trained for 10 epochs (about 2.2 h). If fitting the 174 training bugs carries over to the validation bugs, real fixes hold signal worth mining. If validation stays at chance while training loss falls, the model only memorizes, and new data (mutants first) is the lever. The data work starts either way.
 
 
 
@@ -320,6 +337,8 @@ Five questions are open. The most important is which question types make up v1.
 
 | Date | Decision |
 | --- | --- |
+| Oct 15, 2026 | Memorization run: the 8B LoRA setup fits 64 training examples (loss 0.27 vs 1.28; training pairs 0.96–1.00), so the pipeline works and v1's 2 epochs underfit. Next: v1 for 10 epochs to see whether fitting real bugs carries over to unseen ones; the data work (mutant pilot) starts in parallel |
+| Oct 14, 2026 | LoRA v1 also stayed at the base rates (second-epoch training loss 1.34 vs 1.36), and buggy/fixed pairs are at chance. Its bug-location ranking beats chance (0.230 vs 0.150) and simple layout rules. The "elsewhere" examples' 0.5 weight now takes effect. Next: a 64-example memorization run on the GPUs decides between fixing the setup and getting more data |
 | Oct 14, 2026 | Data plan written ([Getting More Training Data](https://claude.ai/code/artifact/b54b90ea-0107-49a4-832c-ede95609c6cd)). Labeled bugs, not tokens, limit us: 174 distinct bugs vs about 30k examples for Kev-9B. Hardware CWEs become the label set and the recipes for injected security bugs, not training examples: 25 of the 34 CWEs with Verilog code quote test-family designs. Next: a 1,000-module mutant pilot, then a 30k slice of module-level examples (~1,500 tokens) |
 | Oct 14, 2026 | LoRA v0 learned only the base rates. v1 recipe: whole fixes are shuffled, so a buggy file and its fix train in the same step (`--shuffle group`), and the pointer head learning rate drops from 1e-3 to 1e-4. Evals add buggy/fixed pair accuracy and blocks-only bug location |
 | Oct 14, 2026 | Zero-shot baseline rerun on the cleaned test set (1,029), plus bug location read from Qwen's written answer: it says "none" almost everywhere. The bug_location baseline is now "always none" (acc 0.577, NLL 1.980) instead of a uniform guess, and the eval prints the buggy/no-bug split; `python -m jev.metrics` re-scores saved predictions |

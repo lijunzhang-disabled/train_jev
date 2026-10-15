@@ -59,14 +59,14 @@ def parse_args():
 
 
 def batch_loss(logits, items, device):
-    """Weighted mean over all questions in the micro-batch of the soft-label cross-entropy."""
-    total, weights = 0.0, 0.0
+    """Soft-label cross-entropy times each question's weight, averaged over the micro-batch's questions.
+    Dividing by the count, not the summed weights, keeps a weight in effect when a micro-batch holds one example."""
+    total, n = 0.0, 0
     for row, item in zip(logits, items):
         for lg, q in zip(row, item["questions"]):
-            w = q.get("weight", 1.0)
-            total = total + w * soft_cross_entropy(lg, torch.tensor(q["target"], device=device))
-            weights += w
-    return total / max(weights, 1e-8)
+            total = total + q.get("weight", 1.0) * soft_cross_entropy(lg, torch.tensor(q["target"], device=device))
+            n += 1
+    return total / max(n, 1)
 
 
 def lr_lambda(warmup, total):
