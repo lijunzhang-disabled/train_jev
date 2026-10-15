@@ -1,6 +1,6 @@
 # Jev-like Hardware Security Model: Working Plan
 
-As of Oct 14, 2026 · Lijun Zhang
+As of Oct 15, 2026 · Lijun Zhang
 
 > This is the git-tracked copy of the plan. The live version is the Claude Doc at
 > https://claude.ai/code/artifact/b5e47478-1f63-41d8-80c5-6225dd0ea7d2. Claude updates both together.
@@ -14,7 +14,7 @@ Week 1 starts Oct 12, 2026. Change the Status column as phases move.
 | Phase | Delivers | Weeks | Status |
 | --- | --- | --- | --- |
 | 0. Setup | Repo skeleton, hardware tools, GPU environment, smoke runs | 1 | In progress |
-| 1. Dataset v1 | General hardware dataset with tool, by-construction and teacher labels | 1–2 | Not started |
+| 1. Dataset v1 | General hardware dataset with tool, by-construction and teacher labels | 1–2 | In progress |
 | 2. Eval and baselines | Eval harness; zero-shot Qwen and teacher numbers | 2 | Not started |
 | 3. SFT v1 | Qwen3-8B LoRA model with calibrated probabilities | 3 | Not started |
 | 4. Ablations | Fixed training recipe | 4 | Not started |
@@ -167,6 +167,9 @@ The target is about 40k RTL modules with 5–10 questions each, labeled mostly b
     - Leave out the benchmark's design families (PULPissimo/RI5CY, Ariane/CVA6, OpenPiton, OR1200), plus every file an hwe-bench test case touches, so both test sets measure generalization.
 2. **Remove duplicates and split.** Remove near-duplicates with MinHash. Split train/val/test by project family, never by file.
 3. **Inject bugs** (types B, C, D). Use rule-based mutations (reset value, inverted condition, off-by-one, FSM transition, swapped signals, removed check) plus realistic bugs written by the teacher. Run an equivalence check on each mutant: one that behaves the same as the original is labeled "no bug". Older hwe-bench OpenTitan cases, plus bug fixes mined from project history with hwe-bench's scripts, add real bugs.
+    - **Pilot code (Oct 15):** `tools/build_mutants.py` applies 12 one-edit operators to MetRex designs, never touching comments. It labels each mutant with a Yosys miter run through `sat -tempinduct` from zero-initialized registers. A counterexample means a bug, an induction proof means "no bug", and anything else is dropped. 17,891 of MetRex's 25,868 designs pass the filters (at least 20 lines, at most 3,000 tokens, no duplicates, testbenches or test-family names).
+    - **Dev-box test on 24 designs:** all 24 parsed. Of 58 mutants, 45 changed behavior and 3 were proven equivalent; all 3 were checked by hand. The other 10 hit the 20-step limit, a timeout or a double driver and were dropped. Examples are short: a median of 475 tokens and 3 blocks.
+    - **Two traps, now fixed:** `miter -ignore_gold_x` without `sat -enable_undef` makes the check vacuous, so an obvious shift-register bug came back "equivalent". And a mutant that gives a net a second driver can hide its difference from SAT, so Yosys `check` now drops such mutants.
 4. **Write properties** (type A). Start from CodeV-SVA's 324K RTL + SVA pairs, which only need SymbiYosys labels; the teacher writes assertions for modules that have none. SymbiYosys checks each one on the clean version and on each mutant.
     - A proof or a counterexample becomes a hard label. "No violation within k cycles" gets a softer label, and timeouts are dropped.
     - Aim for roughly half violated and half holding.
@@ -253,7 +256,24 @@ LoRA v1 therefore shuffles whole fixes instead of single examples (`--shuffle gr
 
 **Memorization run** (Oct 15, 2026: the first 64 training examples, 13 bugs, 20 epochs = 80 steps, 16 min on 4 H20s, validated on the same 64): the setup can fit. Training loss fell from 1.85 to 0.27, against 1.28 for these examples' label frequencies. On those examples accuracy reached 0.94–0.97, and the buggy version looked buggier in 27 or all 28 pairs. After 2 epochs, v1's length, loss was still at the base rate; it only fell below from about epoch 5. So v1 stopped too early to say whether 174 bugs are enough.
 
-**Next:** v1 trained for 10 epochs (about 2.2 h). If fitting the 174 training bugs carries over to the validation bugs, real fixes hold signal worth mining. If validation stays at chance while training loss falls, the model only memorizes, and new data (mutants first) is the lever. The data work starts either way.
+**v1 for 10 epochs** (Oct 15, 2026: 570 steps, 1 h 59 min on 4 H20s, `runs/qwen3-8b-lora-v1-10ep`): the model memorized the training bugs, and none of it carried over to new ones.
+
+- **Training loss** dropped below the label-frequency level (1.33 now that "elsewhere" examples count half) from about epoch 4, and reached about 0.5 by epoch 10.
+- **Validation got worse.** NLL held near the base rate until step 250 (bug_present at best 0.676, vs 0.690 at step 50), then rose to 1.19 for bug_present, 2.21 for bug_category and 3.12 for bug_location. Validation pairs moved between 0.38 and 0.64 over 11 checks, with no trend.
+- **Test:** pairs stayed at chance, and calibration was lost: the model grew confident on new files without being right.
+
+| Question | LoRA v1 NLL | 10 epochs NLL | 10 epochs ECE | 10 epochs AUROC | 10 epochs pairs |
+| --- | --- | --- | --- | --- | --- |
+| bug_present | 0.690 | 1.188 | 0.341 | 0.541 | 0.480 |
+| bug_category | 1.324 | 1.986 | 0.324 | | 0.524 |
+| bug_location | 1.947 | 2.818 | 0.215 | | 0.485 |
+| property_violated | 0.838 | 1.321 | 0.501 | 0.298 | |
+
+- **Block ranking weakened but stayed above chance:** 18.9% (top-3: 44.1%), against 23.0% (45.5%) for v1 and 15.0% (35.9%) for chance.
+
+**What this decides.** 174 real bugs teach the model those bugs, not bugs in general, and more epochs only trade calibration for memorization. So the lever is more labeled bugs, starting with mutants, as planned. Real fixes stay as validation and test data. Mining more of them waits until mutants show whether more bugs help at all.
+
+**Next:** the mutant pilot (Phase 1 step 3, guide step 10). It runs 1,000 MetRex designs through `tools/build_mutants.py`, then a short LoRA run on the resulting examples, judged on held-out mutants, the real-bug validation set and hwe-bench pairs.
 
 
 
@@ -336,6 +356,7 @@ Four questions are open. The most important is which question types make up v1.
 
 | Date | Decision |
 | --- | --- |
+| Oct 15, 2026 | v1 for 10 epochs memorized the training bugs. Training loss fell to about 0.5 (base rate 1.33), while validation NLL rose (bug_present 0.69 → 1.19) and hwe-bench pairs stayed at chance (0.48). Real fixes alone don't generalize at this size, so mutants come first and mining more fixes waits. Mutant pilot written (`tools/build_mutants.py`, guide step 10): MetRex designs, labeled by a Yosys equivalence check |
 | Oct 15, 2026 | The teacher is GLM3-Flash, not DeepSeek V4.1 Flash. The server reaches it (over 100 tokens/s), but colleagues share it, so our jobs use only part of its capacity: 4 requests at a time by default. Every Phase 0 guide step passes on the server, formal tools included |
 | Oct 15, 2026 | Memorization run: the 8B LoRA setup fits 64 training examples (loss 0.27 vs 1.28; training pairs 0.96–1.00), so the pipeline works and v1's 2 epochs underfit. Next: v1 for 10 epochs to see whether fitting real bugs carries over to unseen ones; the data work (mutant pilot) starts in parallel |
 | Oct 14, 2026 | LoRA v1 also stayed at the base rates (second-epoch training loss 1.34 vs 1.36), and buggy/fixed pairs are at chance. Its bug-location ranking beats chance (0.230 vs 0.150) and simple layout rules. The "elsewhere" examples' 0.5 weight now takes effect. Next: a 64-example memorization run on the GPUs decides between fixing the setup and getting more data |

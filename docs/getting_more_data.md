@@ -1,6 +1,6 @@
 # Getting More Training Data
 
-As of Oct 14, 2026 · Lijun Zhang
+As of Oct 15, 2026 · Lijun Zhang
 
 > Git copy of the Claude Doc at https://claude.ai/code/artifact/b54b90ea-0107-49a4-832c-ede95609c6cd
 > (Claude updates both together). The doc draws the model sizes as a chart; here they are a table.
@@ -71,6 +71,17 @@ Most new labels should come from tools, as they did for Kev and Open-Jev. That m
 
 Clean module pools for the mutants: [MetRex](https://huggingface.co/datasets/scale-lab/MetRex) (25,868 modules), [openrtlset-permissive-verified](https://huggingface.co/datasets/theepicflyer/openrtlset-permissive-verified) (13,625), BaseJump STL and PicoRV32. The full survey is in `docs/hf_dataset_survey.md`.
 
+**KSU-HW-SEC's datasets** ([their Hugging Face page](https://huggingface.co/KSU-HW-SEC), 12 sets, checked 2026-10-15) add little now. Only SynthAgentic-Eval carries labels we could use:
+
+| Dataset | Verdict | Why |
+| --- | --- | --- |
+| [SynthAgentic-Eval](https://huggingface.co/datasets/KSU-HW-SEC/SynthAgentic-Eval) | Later | 32,320 LLM-written designs for 202 specified tasks (VerilogEval, RTLLM), each with its testbench result; about 24% fail. It fits a "does this design meet its spec?" question. MIT. Only 202 tasks and no bug location |
+| [5W1HHardwareDebug](https://huggingface.co/datasets/KSU-HW-SEC/5W1HHardwareDebug) | Maybe | 810 semi-synthetic bugs (original and modified code) from 8 small GitHub repos outside our test families. MIT, but gated: it needs a Hugging Face login and token |
+| [LLM4SecHW-OSHD](https://huggingface.co/datasets/KSU-HW-SEC/LLM4SecHW-OSHD) | No | Real bug-fix PRs, but from Pulp, OpenPiton, CVA6, Ibex and OpenTitan, our test projects |
+| [issue_benchmark](https://huggingface.co/datasets/KSU-HW-SEC/issue_benchmark), [Fixbench-RTL](https://huggingface.co/datasets/KSU-HW-SEC/Fixbench-RTL) | No | Built from test projects: a sample of issue_benchmark is about 99% Ibex |
+| hardware_code_and_sec_small / median / large | No | 0.5–3.6M unlabeled documents (2.9–45 GB) for pretraining |
+| Verilog_code, Structure_data, PPA_data | No | Instruction-tuning code, AST/DFG and area/power/timing data; no bug or property labels |
+
 Two rules apply to every source:
 
 - **Keep pairs together.** Each mutant trains in the same step as its original, like our buggy/fixed pairs and Kev's minimal pairs.
@@ -117,6 +128,23 @@ So the CWE list gives us the vocabulary and the recipes. The examples themselves
 
 The target for dataset v1 stays the plan's Phase 1 goal: about 40,000 modules from outside the test families. That is roughly 160,000 examples (each module plus ~3 mutants), mostly labeled by tools. We get there in stages, testing on real bugs after each.
 
+**What the sources in hand give.** Mutant numbers are estimates from 38 designs on the dev box (1.97 behavior-changing mutants and 0.18 equivalent ones per design); the pilot will measure them. The other rows are counted from the converted data.
+
+| Source | Buggy | Bug-free | Property: violated / holds | Examples |
+| --- | --- | --- | --- | --- |
+| Real fixes (Phase 0, OpenTitan) | 404 | 506 | | 910 |
+| Mutant pilot (1,000 MetRex designs) | ~1,950 | ~1,180 | | ~3,100 |
+| rtl-augmented-v3 (bugs confirmed by simulation) | 600 | 233 | | 833 |
+| EquivSVA | 360 | 480 | ~360 / ~6,040 | ~7,200 |
+| HierSVA | 28 | 27 | its 2,273 proven assertions wait for yosys-slang | 55 |
+| **After guide step 10** | **~3,300** | **~2,400** | **~360 / ~6,040** | **~12,100** |
+| Full mutant run (MetRex + openrtlset: 25,030 designs), replacing the pilot | ~44,000–49,000 | ~27,000–30,000 | | ~71,000–79,000 |
+| **After the full run** | **~45,000–51,000** | **~28,000–31,000** | **~360 / ~6,040** | **~80,000–88,000** |
+
+- **Bugs grow 260–290-fold:** from 174 real bugs to roughly 45,000–50,000 labeled bugs, above Kev-9B's 30,540 records. Each design's mutants share its code, so independent designs number about 25,000.
+- **Property labels are lopsided:** about 6% violated, against 73% in the security benchmark. Violated examples come next: mutants checked against HierSVA's and CodeV-SVA's assertions.
+- **The 40,000-module target** needs about 15,000 more clean designs; the larger raw pools in the survey (OpenRTLSet, CodeV-R1) are where they come from.
+
 **Shorter inputs make this affordable.** Our Phase 0 examples have a median of 4,155 tokens. Module-level examples of about 1,500 tokens cut training time about 3× per example. They also make a one-line bug easier to find. Times below assume v0's speed of about 5,000 tokens/s on 4 H20s.
 
 | Stage | Examples | Tokens per epoch | Training time per epoch |
@@ -130,8 +158,12 @@ Labeling also costs CPU time on the server: an equivalence check or a SymbiYosys
 **Order of work**
 
 1. **Finish the Phase 0 checks.** The formal tools (guide step 5) pass on the server, and it reaches the teacher, GLM3-Flash. Left: `teacher.py bench --concurrency 4` (step 6), which sets our teacher budget.
-2. **Pilot on 1,000 modules.** Build the mutator and the equivalence-check labeling. Measure the yosys-slang parse rate, the share of mutants that change behavior, and seconds per check. Measure CodeV-SVA's parse rate on 1,000 assertions too.
-3. **Switch to module-level examples** of about 1,500 tokens, so bug location chooses among the blocks of one module.
+2. **Pilot on 1,000 modules.** Build the mutator and the equivalence-check labeling. Measure the parse rate, the share of mutants that change behavior, and seconds per check. Measure CodeV-SVA's parse rate on 1,000 assertions too.
+    - **Code ready (Oct 15):** `tools/build_mutants.py`, run by guide step 10. It has 12 one-edit operators and a Yosys miter checked by `sat -tempinduct`. A short LoRA run on the pilot's examples follows, to see early whether mutants move the real-bug numbers. The 10-epoch run on real fixes (Oct 15) memorized them without generalizing, so this is now the main line.
+    - **Dev-box test, 24 designs:** all parsed, 78% of mutants changed behavior and 5% were proven equivalent. The rest hit the step limit or a timeout, or added a second driver to a net, and were dropped. The median check took 0.3 s on the dev box's WebAssembly Yosys.
+    - CodeV-SVA's parse rate is still to measure.
+    - **Labeled sets (Oct 15):** `tools/fetch_labeled_sets.sh` and `tools/build_labeled_sets.py` convert rtl-augmented-v3, EquivSVA and HierSVA (guide step 10e). EquivSVA's properties are checked by plain Yosys as immediate assertions; on 3 families, every property was proven on all equivalent designs, and each mutant broke the properties its name implies. `build_mutants.py` now also reads openrtlset and splits it by repo.
+3. **Switch to module-level examples** of about 1,500 tokens, so bug location chooses among the blocks of one module. The pilot's examples are module-level already. MetRex designs are shorter than planned: a median of 475 tokens and 3 blocks of 16 lines in the dev-box test.
 4. **Build the 30,000-example slice, train and evaluate.** This is the first real test of whether more data helps.
 5. **Scale to dataset v1.** Add assertion outcomes from CodeV-SVA, bugs written by the teacher, and real fixes mined from git. Add teacher labels for structure questions only after measuring the teacher against tool labels.
 6. **Phase 5 security data:** CWE-based injections, as in the CWE section above.

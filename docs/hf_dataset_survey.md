@@ -54,6 +54,16 @@ F bug category, G "does this assertion catch this bug?", H structure and semanti
    hardware-security bug set found is built from the test families. We generate E/F/T data ourselves
    (Phase 5); HierSVA's `bsg_async_*` modules are a good multi-clock seed.
 
+## KSU-HW-SEC (checked 2026-10-15)
+
+All 12 sets on https://huggingface.co/KSU-HW-SEC. Useful later: SynthAgentic-Eval (MIT; 32,320 LLM-written
+designs for 202 VerilogEval/RTLLM tasks with prompt, code and testbench pass/fail, about 24% fail: a "meets its
+spec?" question). Maybe: 5W1HHardwareDebug (MIT, auto-gated; 810 semi-synthetic bugs from 8 small non-test repos).
+No: LLM4SecHW-OSHD (auto-gated; bug-fix PRs from Pulp, OpenPiton, CVA6, Ibex, OpenTitan), issue_benchmark (a
+400 KB sample is ~99% Ibex), Fixbench-RTL, hardware_code_and_sec_small/median/large (0.5-3.6M unlabeled
+pretraining documents, 2.9-45 GB, auto-gated), Verilog_code, Structure_data, PPA_data (no bug or property labels),
+food-science-llm-protocol.
+
 ## Do not train on (built from test families)
 
 henryen/hwe-bench (the test set itself), rtl-debug-bench/rtl-debug-bench, Zeeh-Lin/RtlDebugBenchDataset,

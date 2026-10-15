@@ -7,7 +7,7 @@ https://claude.ai/code/artifact/95cbaea8-5860-4ab6-b94c-7f0dddbb66aa (Claude upd
 
 Phase 0 proves that every piece works on the H20 server before we scale up data: the Python environment, the GPUs, the formal tools, the teacher endpoint, and one small training run end to end. Plan for about half a day; most of it is waiting for downloads.
 
-Run the steps in order. Each one ends with a check, and the section after step 9 lists what to paste back to me.
+Run the steps in order. Each one ends with a check, and the section after step 10 lists what to paste back to me.
 
 1. Get the code (5 min)
 2. Python environment (15–30 min)
@@ -18,6 +18,7 @@ Run the steps in order. Each one ends with a check, and the section after step 9
 7. Build the benchmarks and the Phase 0 dataset (5 min)
 8. GPU smoke run on 2 cards (10 min)
 9. First real run: zero-shot baseline, then Qwen3-8B LoRA (1–2 h)
+10. Mutant pilot: injected bugs labeled by Yosys, then a short LoRA run on them (about 1 h)
 
 The guide assumes Linux, a working NVIDIA driver and CUDA, Python 3.10–3.13, git, and internet access to GitHub, PyPI, and ModelScope or Hugging Face. Commands run from the repo root unless a step says otherwise.
 
@@ -242,6 +243,67 @@ What to expect:
 
 **Check:** `train.log` shows the loss going down, and both `eval.log` files list metrics for all four questions.
 
+## Step 10: Mutant pilot
+
+Ten epochs on the 174 real training bugs memorized them and carried nothing over to new bugs (plan, Phase 2). So the next data comes from mutants: one-edit bugs injected into clean Verilog designs from MetRex (25,868 designs, BSD-3-Clause). Each mutant is labeled by a Yosys equivalence check against its original: a counterexample means a bug; a proof means no behavior changed. The pilot measures how many designs parse, how many mutants change behavior, and how long a check takes. A short LoRA run on its examples then shows whether training on mutants moves the real-bug numbers.
+
+```bash
+git pull
+
+# a) MetRex, 137 MB; prefix HF_ENDPOINT=https://hf-mirror.com if Hugging Face times out
+tools/fetch_metrex.sh
+
+# b) 1,000 designs, up to 3 mutants each; CPU only, Yosys from step 5. --jobs is the number of Yosys
+#    processes: pick what the server can spare (see nproc and uptime). Roughly 10-30 min with 8 jobs.
+python tools/build_mutants.py --limit 1000 --jobs 8 --out data/mutants_pilot
+
+# c) a data dir for training on mutants: mutant training set, the real-bug validation set, both test
+#    sets, and the held-out mutants as a third test set
+mkdir -p data/mut_pilot
+ln -sf ../mutants_pilot/train.jsonl data/mut_pilot/train.jsonl
+ln -sf ../mutants_pilot/val.jsonl data/mut_pilot/eval_mut.jsonl
+for f in val eval_hwe eval_vb; do ln -sf ../phase0/$f.jsonl data/mut_pilot/$f.jsonl; done
+
+# d) LoRA on the mutants (about 3,000 short examples), 2 epochs plus evaluation, about 30 min on 4 cards;
+#    validation every 50 steps, and only the final checkpoint is kept
+CUDA_VISIBLE_DEVICES=4,5,6,7 NGPU=4 DATA=data/mut_pilot RUN=runs/qwen3-8b-lora-mut-pilot \
+  EXTRA="--eval-every 50 --save-every 0" launch/train.sh
+
+# e) the labeled sets: rtl-augmented-v3 (600 bugs), EquivSVA (840 bug and about 6,400 property examples)
+#    and HierSVA (28 bugs), plus openrtlset for the full mutant run. The download is about 6,000 small files;
+#    the build runs about 3,200 Yosys property checks, roughly 10-20 min with 8 jobs.
+tools/fetch_labeled_sets.sh
+python tools/build_labeled_sets.py --jobs 8 --out data/labeled_v1
+
+# f) after d): the same run on mutants + labeled sets, the first training data for property_violated
+mkdir -p data/mix_pilot
+cat data/mutants_pilot/train.jsonl data/labeled_v1/train.jsonl > data/mix_pilot/train.jsonl
+ln -sf ../mutants_pilot/val.jsonl data/mix_pilot/eval_mut.jsonl
+ln -sf ../labeled_v1/val.jsonl data/mix_pilot/eval_lab.jsonl
+for f in val eval_hwe eval_vb; do ln -sf ../phase0/$f.jsonl data/mix_pilot/$f.jsonl; done
+CUDA_VISIBLE_DEVICES=4,5,6,7 NGPU=4 DATA=data/mix_pilot RUN=runs/qwen3-8b-lora-mix-pilot \
+  EXTRA="--eval-every 50 --save-every 0" launch/train.sh
+```
+
+| Output | Where |
+| --- | --- |
+| Pilot summary | printed at the end of b), and `data/mutants_pilot/stats.json` |
+| Every Yosys run (verdict, seconds, the edited line before and after) | `data/mutants_pilot/checks.jsonl` |
+| Examples | `data/mutants_pilot/train.jsonl`, `val.jsonl` (5% of designs) |
+| Training and test metrics | `runs/qwen3-8b-lora-mut-pilot/train.log`, `eval.log` (now `eval_hwe`, `eval_mut` and `eval_vb`) |
+| Labeled sets summary | printed at the end of e), and `data/labeled_v1/stats.json` |
+| Mixed run | `runs/qwen3-8b-lora-mix-pilot/train.log`, `eval.log` (adds `eval_lab`: held-out rtl-augmented-v3 repos and EquivSVA's test families) |
+
+What to expect:
+
+- **Pilot:** on 24 designs on the dev box, every design parsed, 78% of mutants changed behavior and 5% were proven equivalent; the rest hit the 20-step limit or a timeout and were dropped. The native Yosys here should be several times faster than the dev box's WebAssembly build (median 0.3 s per check there).
+- **eval_mut** (held-out mutants) should be clearly above chance: `pairs` (mutant rated buggier than its original) well above 0.5. If not, the model can't even learn mutants, and the problem is the setup, not the data.
+- **val, eval_hwe** answer the real question: does training on mutants transfer to real bugs? Look at `pairs` above 0.5 and `buggy, blocks only` above chance, as in step 9. Expect small effects from 1,000 designs; the full MetRex pool (about 17,900 usable designs) comes next.
+- **Labeled sets:** EquivSVA's property checks should prove every property on its equivalent designs (`property checks` mostly `holds`; a family whose designs fail is dropped and counted). Only about 13% of mutant/property pairs are violated, so `property_violated` answers are mostly "no".
+- **Mixed run (f):** compare with d). `eval_vb` is the security benchmark's property question, untrained until now (AUROC 0.30 so far).
+
+**Check:** the pilot summary shows a parse rate and a verdict count for each operator, and `eval.log` lists all three test sets.
+
 ## What to send back, and fixes for common failures
 
 Paste these back to me when you're done, or at the first step that fails. For any error, paste the full traceback, not just its last line.
@@ -252,6 +314,8 @@ Paste these back to me when you're done, or at the first step that fails. For an
 - [ ] `data/phase0/stats.json` (step 7)
 - [ ] `runs/smoke_gpu/train.log` and `runs/smoke_gpu/eval.log` (step 8)
 - [ ] `runs/zeroshot-Qwen3-8B/eval.log`, `runs/qwen3-8b-lora-v1/eval.log`, and `grep -E "^step|val @" runs/qwen3-8b-lora-v1/train.log` (step 9)
+- [ ] The pilot summary (everything from `parse:` down), `runs/qwen3-8b-lora-mut-pilot/eval.log`, and `grep -E "^step|val @" runs/qwen3-8b-lora-mut-pilot/train.log` (step 10)
+- [ ] The labeled sets summary (the end of `build_labeled_sets.py`'s output) and `runs/qwen3-8b-lora-mix-pilot/eval.log` (step 10)
 
 | Symptom | Likely cause and fix |
 | --- | --- |
@@ -267,6 +331,8 @@ Paste these back to me when you're done, or at the first step that fails. For an
 | The OSS CAD Suite download is slow or keeps breaking | Rerun `install_oss_cad_suite.sh`; it resumes. Try `CONNECTIONS=16`, or copy the `.tgz` in from another machine (step 5) |
 | `formal smoke test: FAILED` | Usually `PATH` lacks `oss-cad-suite/bin`. The script prints the path of `sby.log` |
 | `teacher.py`: `cannot reach ...` | Wrong URL (it usually needs `/v1`), the server is down, or a firewall is in the way |
+| `build_mutants.py`: `No such file or directory: 'yosys'` | `PATH` lacks `oss-cad-suite/bin` (step 5) |
+| `build_mutants.py`: most designs end in `parse error` | Send `data/mutants_pilot/stats.json`; its `parse_errors_top` shows why |
 
 ## Reference: scripts
 
@@ -283,8 +349,12 @@ Every script below was run on the dev box before handoff. The GPU scripts were r
 | `tools/build_benchmarks.py` | Merges both into `data/benchmarks/benchmarks.jsonl`, with buggy/fixed RTL and changed lines | 7 |
 | `tools/build_phase0_data.py` | Builds `data/phase0/` training and test examples | 7 |
 | `launch/smoke_gpu.sh` | Short end-to-end GPU run on Qwen3-0.6B | 8 |
-| `launch/eval.sh` | Test-set evaluation: zero-shot, or a checkpoint via `CHECKPOINT=` | 9 |
-| `launch/train.sh` | LoRA training on Qwen3-8B, then test-set evaluation | 9 |
+| `launch/eval.sh` | Test-set evaluation (every `eval_*.jsonl` in `DATA`): zero-shot, or a checkpoint via `CHECKPOINT=` | 9 |
+| `launch/train.sh` | LoRA training on Qwen3-8B, then evaluation on every `eval_*.jsonl` in `DATA` | 9, 10 |
+| `tools/fetch_metrex.sh` | Downloads MetRex, the clean Verilog pool, at a pinned version | 10 |
+| `tools/build_mutants.py` | Injects one-edit bugs into MetRex and openrtlset designs, labels them with a Yosys equivalence check, writes examples | 10 |
+| `tools/fetch_labeled_sets.sh` | Downloads rtl-augmented-v3, EquivSVA, HierSVA and openrtlset at pinned versions | 10 |
+| `tools/build_labeled_sets.py` | Turns them into bug examples, and EquivSVA's properties into property examples checked by Yosys | 10 |
 | `launch/smoke_cpu.sh` | The CPU version of the whole pipeline (dev box only) | — |
 | `jev/train.py`, `jev/eval.py` | Training and evaluation entry points (`python -m jev.train ...`, or under torchrun) | — |
 | `jev/format.py`, `jev/model.py` | Prompt rendering with answer slots; LM-head and pointer readouts, LoRA, checkpoints | — |
@@ -297,6 +367,7 @@ Launch scripts take their settings from environment variables:
 | `MODEL` | Base model directory | `models/Qwen3-0.6B` (smoke), `models/Qwen3-8B` |
 | `RUN` / `OUT` | Output directory | under `runs/` |
 | `EPOCHS`, `LR`, `SEQ_PER_STEP` | Training length, LoRA learning rate, sequences per optimizer step | 2, 1e-4, 16 |
+| `DATA` | Data directory: `train.jsonl`, `val.jsonl`, and the `eval_*.jsonl` test sets | `data/phase0` |
 | `MAX_SEQ` | Token limit; must match the data build | 8192 |
 | `CHECKPOINT` | Checkpoint for `eval.sh` (unset = zero-shot) | unset |
 | `POINTER` | How `eval.sh` answers bug location: `head` (pointer head) or `lm` (the block number Qwen would write) | `head` |

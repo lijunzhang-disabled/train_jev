@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Step 9 of docs/phase0_guide.md: the first real run. LoRA on Qwen3-8B over the Phase 0 training set,
-# then evaluation on both test sets. Keeps 16 sequences per optimizer step whatever NGPU is.
+# then evaluation on every $DATA/eval_*.jsonl (both test sets, plus held-out mutants in a mutant data dir).
+# Keeps 16 sequences per optimizer step whatever NGPU is.
 #
 #   NGPU=4 launch/train.sh
 #   NGPU=2 RUN=runs/qwen3-8b-lora-v1-2gpu launch/train.sh
@@ -34,6 +35,6 @@ RUNNER=("$PYTHON" -m torch.distributed.run --standalone --nproc_per_node "$NGPU"
 eval_args=()
 [ -n "$EVAL_LIMIT" ] && eval_args=(--limit "$EVAL_LIMIT")
 "${RUNNER[@]}" -m jev.eval --model "$MODEL" --checkpoint "$RUN/final" --max-seq-tokens "$MAX_SEQ" "${eval_args[@]}" \
-    --data "$DATA/eval_hwe.jsonl" "$DATA/eval_vb.jsonl" --out "$RUN/eval" 2>&1 | tee "$RUN/eval.log"
+    --data "$DATA"/eval_*.jsonl --out "$RUN/eval" 2>&1 | tee "$RUN/eval.log"
 
 echo "done: $RUN (train.log, eval.log, eval/*.metrics.json)"

@@ -62,15 +62,18 @@ def bug_score(p):
 
 
 def pair_accuracy(ps):
-    """The share of buggy/fixed pairs (ids ending in /buggy and /fixed) in which the buggy version gets the
-    higher bug probability; ties count half. Pairs cancel what differs between files, so this is the most
-    direct test of whether the model tells a bug from its fix. Returns (accuracy, pairs)."""
-    by_file = collections.defaultdict(dict)
+    """The share of buggy/fixed pairs (ids ending in /buggy and /fixed, or a mutant's /buggy-<j> and its
+    original's /clean) in which the buggy version gets the higher bug probability; ties count half. Pairs
+    cancel what differs between files, so this is the most direct test of whether the model tells a bug
+    from its fix. Returns (accuracy, pairs)."""
+    clean, buggy = {}, collections.defaultdict(list)
     for p in ps:
         key, _, kind = p.get("id", "").rpartition("/")
-        if kind in ("buggy", "fixed"):
-            by_file[key][kind] = bug_score(p)
-    diffs = [d["buggy"] - d["fixed"] for d in by_file.values() if len(d) == 2 and None not in d.values()]
+        if kind in ("fixed", "clean"):
+            clean[key] = bug_score(p)
+        elif kind == "buggy" or kind.startswith("buggy-"):
+            buggy[key].append(bug_score(p))
+    diffs = [b - clean[k] for k, bs in buggy.items() if clean.get(k) is not None for b in bs if b is not None]
     if not diffs:
         return None, 0
     return float(np.mean([(d > 0) + 0.5 * (d == 0) for d in diffs])), len(diffs)
