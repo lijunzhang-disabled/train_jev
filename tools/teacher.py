@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Talk to the DeepSeek teacher through its OpenAI-compatible API. Stdlib only.
+"""Talk to the teacher model (GLM3-Flash) through its OpenAI-compatible API. Stdlib only.
 
     python3 -I tools/teacher.py --base-url http://HOST:PORT/v1 --model MODEL check
-    python3 -I tools/teacher.py --base-url http://HOST:PORT/v1 --model MODEL bench --concurrency 32 --requests 64
+    python3 -I tools/teacher.py --base-url http://HOST:PORT/v1 --model MODEL bench --concurrency 4 --requests 16
     python3 -I tools/teacher.py --mock check        # no server: tests this script itself
 
 The API key comes from --api-key or $TEACHER_API_KEY (local servers often need none).
+The endpoint is shared with colleagues, so keep --concurrency low: a few requests at a time, never the full capacity.
 """
 import argparse
 import concurrent.futures
@@ -134,8 +135,8 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("check", help="list models and send one request")
     b = sub.add_parser("bench", help="measure throughput with concurrent requests")
-    b.add_argument("--concurrency", type=int, default=32)
-    b.add_argument("--requests", type=int, default=64)
+    b.add_argument("--concurrency", type=int, default=4, help="requests in flight; the server is shared, so keep it low")
+    b.add_argument("--requests", type=int, default=16)
     b.add_argument("--max-tokens", type=int, default=1024)
     args = ap.parse_args()
     if not args.mock and not args.base_url:

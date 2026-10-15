@@ -58,16 +58,16 @@ All numbers are as the projects report them, checked 2026-10-14.
 
 ## Where we can get more labeled data
 
-Most new labels should come from tools, as they did for Kev and Open-Jev. That means bugs we inject into clean RTL and label with an equivalence check, and assertions labeled by SymbiYosys. Real bug fixes and existing datasets add realism. DeepSeek labels only what tools can't, and only where its answers hold up.
+Most new labels should come from tools, as they did for Kev and Open-Jev. That means bugs we inject into clean RTL and label with an equivalence check, and assertions labeled by SymbiYosys. Real bug fixes and existing datasets add realism. The teacher (GLM3-Flash) labels only what tools can't, and only where its answers hold up.
 
 | Source | Questions | How it's labeled | Rough yield | Cost and risk |
 | --- | --- | --- | --- | --- |
 | Mutants of clean modules | bug_present, category, location | Rule-based source edits: inverted condition, wrong reset value, off-by-one, swapped signal, removed check, FSM transition. An equivalence check against the original drops mutants that change nothing. | ~40k modules × 3 mutants ≈ 120k buggy + 40k clean (estimate) | CPU time for equivalence checks on the server. Mutants look less like real bugs. |
 | Assertion outcomes | "Will formal checking find a violation of this assertion?" | SymbiYosys proves the assertion or finds a counterexample. Bounded-only results get softer labels; timeouts are dropped. | [CodeV-SVA](https://huggingface.co/datasets/wyt2000/CodeV-SVA-datasets) has 324K RTL + assertion pairs that were never checked | Unknown share parses with yosys-slang; solver time |
-| Bugs written by DeepSeek | bug_present, category, location | DeepSeek writes a realistic bug and names its category. The equivalence check confirms the behavior changed. | Limited by DeepSeek throughput (not measured yet) | Needs DeepSeek reachable from the server (guide step 6) |
-| Real bug fixes from git history | bug_present, category, location | The fix's changed lines give the location. DeepSeek reads the PR text for the category. | OpenTitan has 2,594 merged "fix" PRs before 2024; hwe-bench kept 195 | Some "fixes" aren't functional bugs. Must skip the files in `test_exclusions.txt`. |
+| Bugs written by the teacher | bug_present, category, location | The teacher writes a realistic bug as a patch and names its category. The equivalence check confirms the behavior changed. | Limited by our share of the GLM3-Flash endpoint, which colleagues also use (4 requests at a time) | Ask for patches, not whole files, to save output tokens |
+| Real bug fixes from git history | bug_present, category, location | The fix's changed lines give the location. The teacher reads the PR text for the category. | OpenTitan has 2,594 merged "fix" PRs before 2024; hwe-bench kept 195 | Some "fixes" aren't functional bugs. Must skip the files in `test_exclusions.txt`. |
 | Existing labeled datasets | all of the above, plus "does this assertion catch this bug?" | Their own labels: [rtl-augmented-v3](https://huggingface.co/datasets/architect-ubc-capstone/rtl-augmented-v3) (948 injected bugs; strip comments first), [EquivSVA](https://huggingface.co/datasets/aditigupta/EquivSVA) (360 typed mutants, 914 assertions), [HierSVA](https://huggingface.co/datasets/AnonymousHierSVA/HierSVA) (342 modules, 28 buggy variants), [VeriThoughts](https://huggingface.co/datasets/wilyub/VeriThoughtsTrainSet) (10,104 non-equivalent implementations) | ~12k items | Small sets; filter out test-family code first |
-| Teacher labels | structure questions (FSM? reset style? clock domains?) and categories tools can't decide | 3–5 DeepSeek samples, kept only where they agree, weighted by DeepSeek's accuracy on tool-labeled questions | Any size | Weakest labels; measure before trusting |
+| Teacher labels | structure questions (FSM? reset style? clock domains?) and categories tools can't decide | 3–5 teacher samples, kept only where they agree, weighted by the teacher's accuracy on tool-labeled questions | Any size | Weakest labels; measure before trusting |
 
 Clean module pools for the mutants: [MetRex](https://huggingface.co/datasets/scale-lab/MetRex) (25,868 modules), [openrtlset-permissive-verified](https://huggingface.co/datasets/theepicflyer/openrtlset-permissive-verified) (13,625), BaseJump STL and PicoRV32. The full survey is in `docs/hf_dataset_survey.md`.
 
@@ -90,7 +90,7 @@ Yes, but as the label set and as recipes for making security bugs, not as traini
 **How we can use CWEs**
 
 1. **Answer options for a CWE question.** The security benchmark uses 26 CWE IDs. The most common are CWE-1198 (22 properties), CWE-1202 (20), CWE-1262 (19) and CWE-1281 (12). CWE-1198 and CWE-1202 are catalog categories, not single weaknesses, so our options must include them as they are.
-2. **Recipes for injected security bugs.** A CWE's description, mitigations and non-test examples go into a DeepSeek prompt. DeepSeek injects that weakness into a clean training module and writes an assertion that should catch it. SymbiYosys confirms the assertion fails on the injected version and holds on the clean one. The CWE label is known by construction.
+2. **Recipes for injected security bugs.** A CWE's description, mitigations and non-test examples go into a teacher prompt. The teacher injects that weakness into a clean training module and writes an assertion that should catch it. SymbiYosys confirms the assertion fails on the injected version and holds on the clean one. The CWE label is known by construction.
 3. **CWE labels for rule-based mutants.** Each security mutation is mapped to a CWE (table below), so even cheap rule-based mutants carry a CWE label.
 4. **Descriptions in the question.** Each option can carry its one-line CWE description, so the model reads what an option means. This may help with CWEs that have few training examples; it's worth testing, not essential.
 
@@ -129,14 +129,14 @@ Labeling also costs CPU time on the server: an equivalence check or a SymbiYosys
 
 **Order of work**
 
-1. **Finish the Phase 0 checks.** Formal tools (guide step 5) and DeepSeek reachability (step 6) must work on the server.
+1. **Finish the Phase 0 checks.** The formal tools (guide step 5) pass on the server, and it reaches the teacher, GLM3-Flash. Left: `teacher.py bench --concurrency 4` (step 6), which sets our teacher budget.
 2. **Pilot on 1,000 modules.** Build the mutator and the equivalence-check labeling. Measure the yosys-slang parse rate, the share of mutants that change behavior, and seconds per check. Measure CodeV-SVA's parse rate on 1,000 assertions too.
 3. **Switch to module-level examples** of about 1,500 tokens, so bug location chooses among the blocks of one module.
 4. **Build the 30,000-example slice, train and evaluate.** This is the first real test of whether more data helps.
-5. **Scale to dataset v1.** Add assertion outcomes from CodeV-SVA, bugs written by DeepSeek, and real fixes mined from git. Add teacher labels for structure questions only after measuring DeepSeek against tool labels.
+5. **Scale to dataset v1.** Add assertion outcomes from CodeV-SVA, bugs written by the teacher, and real fixes mined from git. Add teacher labels for structure questions only after measuring the teacher against tool labels.
 6. **Phase 5 security data:** CWE-based injections, as in the CWE section above.
 
-**How we know it worked.** Each stage is judged on the real bugs in hwe-bench's test cases, never on mutants alone. Bug_present pairs should beat 0.5, and blocks-only bug location should beat chance (0.150 / 0.359), with calibration kept. If mutants help on mutants but not on hwe-bench, we shift toward DeepSeek-written and mined bugs.
+**How we know it worked.** Each stage is judged on the real bugs in hwe-bench's test cases, never on mutants alone. Bug_present pairs should beat 0.5, and blocks-only bug location should beat chance (0.150 / 0.359), with calibration kept. If mutants help on mutants but not on hwe-bench, we shift toward teacher-written and mined bugs.
 
 **Leakage checks on every build**
 
@@ -146,8 +146,7 @@ Labeling also costs CPU time on the server: an equivalence check or a SymbiYosys
 
 ## Open questions
 
-- [ ] Did the formal tools check (guide step 5) pass on the server?
-- [ ] Is DeepSeek reachable from the server, and at what tokens/s (step 6)?
+- [ ] What output tokens/s do we get from GLM3-Flash at 4 requests at a time (step 6)? The server reaches it, but colleagues share it.
 - [ ] Is it OK to switch from whole-file windows to module-level examples of about 1,500 tokens?
 - [ ] How many server CPU cores can the labeling jobs use?
 - [ ] For the CWE question, should the options be the benchmark's 26 IDs (including categories CWE-1198 and CWE-1202) or all 110 hardware CWEs?

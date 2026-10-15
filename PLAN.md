@@ -15,7 +15,7 @@ Week 1 starts Oct 12, 2026. Change the Status column as phases move.
 | --- | --- | --- | --- |
 | 0. Setup | Repo skeleton, hardware tools, GPU environment, smoke runs | 1 | In progress |
 | 1. Dataset v1 | General hardware dataset with tool, by-construction and teacher labels | 1–2 | Not started |
-| 2. Eval and baselines | Eval harness; zero-shot Qwen and DeepSeek numbers | 2 | Not started |
+| 2. Eval and baselines | Eval harness; zero-shot Qwen and teacher numbers | 2 | Not started |
 | 3. SFT v1 | Qwen3-8B LoRA model with calibrated probabilities | 3 | Not started |
 | 4. Ablations | Fixed training recipe | 4 | Not started |
 | 5. Security | Security questions, data and model, scored on real buggy designs | 5–8 | Not started |
@@ -30,8 +30,8 @@ We fine-tune a pretrained Qwen and train it with log loss against labels we trus
 | Backbone | Qwen3-8B; debug on Qwen3-1.7B. Try a newer base model such as Qwen3.5-9B only after the pipeline works end to end. Qwen3.6 and 3.8 only come in 27B and larger | Plain transformer with mature tooling; Qwen3.5-9B mixes in linear-attention layers that need extra kernels; 1.7B runs ~5x faster for debugging |
 | Inference | One forward pass. Each question gets an `<ans>` slot; logits only over that question's options (LM head sliced to those rows) | No generation; many questions per pass; no full-vocabulary logits |
 | Objective | Log loss on soft labels, weighted by label source; temperature scaling afterwards | Log loss is a proper scoring rule, so probabilities are calibrated when the labels are true outcomes |
-| Label trust | Tool-verified > by construction > teacher > human gold set (eval only) | Calibrate to facts, not to DeepSeek's opinions |
-| Teacher | DeepSeek V4.1 Flash writes scenarios and bug injections, and labels semantic questions with 3–5 samples each | Runs on its own host; this box can't reach it |
+| Label trust | Tool-verified > by construction > teacher > human gold set (eval only) | Calibrate to facts, not to the teacher's opinions |
+| Teacher | GLM3-Flash writes scenarios and bug injections, and labels semantic questions with 3–5 samples each | Runs on a host shared with colleagues: we use only part of its capacity (4 requests at a time by default). This box can't reach it |
 | RL | Not before Phase 6 | Only needed once real outcomes arrive with selection bias |
 | Parallelism | LoRA + DDP first; FSDP full fine-tuning on 4 cards if LoRA plateaus | LoRA fits on one card; full fine-tuning needs ~128 GB of training state |
 | Serving | One model copy per GPU, forward pass only | 8B in bf16 is 16 GB; no decoding, so tensor parallelism doesn't help |
@@ -117,15 +117,15 @@ Demoted after inspection: shailja/Verilog_GitHub (not actually deduplicated, and
 
 ## Workflow
 
-I write and test all code on the dev box. You copy it to the server, run it, and paste back logs. The data pipeline has to run somewhere that can reach DeepSeek, because the dev box can't.
+I write and test all code on the dev box. You copy it to the server, run it, and paste back logs. The data pipeline has to run somewhere that can reach the teacher, because the dev box can't.
 
 - **Claude:** code, configs, launch scripts, CPU smoke tests (Qwen3-0.6B plus a mock teacher), debugging from logs, keeping this doc current.
-- **You:** server setup, the DeepSeek endpoint, running data and training jobs, labeling the human gold sets, pasting back logs and metrics.
+- **You:** server setup, the teacher endpoint, running data and training jobs, labeling the human gold sets, pasting back logs and metrics.
 
 ```
 +---------------------------+                +---------------------------+              +---------------------------+
-| Dev box (here)            |  -- code -->   | H20 server                | -- prompts ->| DeepSeek host             |
-| No GPU, no DeepSeek       |                | You set up and run jobs   |              | DeepSeek V4.1 Flash       |
+| Dev box (here)            |  -- code -->   | H20 server                | -- prompts ->| Teacher host              |
+| No GPU, no teacher        |                | You set up and run jobs   |              | GLM3-Flash (shared)       |
 | Claude writes all code    |                | Data pipeline + tools     |              | Writes properties and     |
 | CPU smoke tests with      |  <- - - - - -  | (SymbiYosys, Verilator)   | <- outputs --| bug injections            |
 | Qwen3-0.6B + mock teacher |   your logs    | Training on 2-4 H20s      |              | Labels semantic questions |
@@ -133,11 +133,11 @@ I write and test all code on the dev box. You copy it to the server, run it, and
 +---------------------------+                +---------------------------+              +---------------------------+
 ```
 
-Code reaches the server by git or a manual copy, and logs come back only when you paste them. The link to DeepSeek assumes the server side can reach it, which is still an open question.
+Code reaches the server by git or a manual copy, and logs come back only when you paste them. The server reaches the teacher; it is shared with colleagues, so our jobs use only part of its capacity.
 
 ## Phase 0: Setup (week 1)
 
-Phase 0 ends when one smoke run passes on CPU here and on 2 GPUs there, SymbiYosys proves a toy property, and DeepSeek answers through our script.
+Phase 0 ends when one smoke run passes on CPU here and on 2 GPUs there, SymbiYosys proves a toy property, and the teacher answers through our script.
 
 **Claude, on the dev box**
 
@@ -152,12 +152,12 @@ Phase 0 ends when one smoke run passes on CPU here and on 2 GPUs there, SymbiYos
 **You, on the server side:** follow the [Phase 0 Setup Guide](https://claude.ai/code/artifact/95cbaea8-5860-4ab6-b94c-7f0dddbb66aa) step by step.
 
 - [x] PyTorch, transformers and peft at the versions in requirements.txt (flash-attn isn't needed)
-- [ ] `nvidia-smi topo -m`: the cards you use should show `NV18` between them
+- [x] `nvidia-smi topo -m`: the cards you use should show `NV18` between them
 - [x] Download Qwen3-0.6B, Qwen3-1.7B and Qwen3-8B from ModelScope into `models/`
-- [ ] Install OSS CAD Suite (Yosys, SymbiYosys, solvers, Verilator, Icarus) on the machine that will run the data pipeline; check that the yosys-slang plugin loads
-- [ ] Confirm the DeepSeek endpoint is OpenAI-compatible and reachable from that machine; measure tokens/s at batch 32
+- [x] Install OSS CAD Suite (Yosys, SymbiYosys, solvers, Verilator, Icarus) on the machine that will run the data pipeline; check that the yosys-slang plugin loads
+- [ ] Teacher endpoint: the server reaches GLM3-Flash (over 100 tokens/s, shared with colleagues); still to run `teacher.py check` and `bench --concurrency 4` (guide step 6)
 - [x] Run `tools/fetch_benchmarks.sh`, then `python3 -I tools/build_benchmarks.py` (under a minute; downloads about 1,000 RTL files from GitHub)
-- [ ] Run the GPU smoke test and paste back the log
+- [x] Run the GPU smoke test and paste back the log
 
 ## Phase 1: General hardware dataset v1 (weeks 1–2)
 
@@ -166,12 +166,12 @@ The target is about 40k RTL modules with 5–10 questions each, labeled mostly b
 1. **Collect the corpus.** Take RTL from outside the test families: the clean module pools MetRex and openrtlset-permissive-verified, projects such as PicoRV32 and BaseJump STL, and OpenTitan files not listed in test_exclusions.txt. Split it into modules. Keep only modules that parse with yosys-slang.
     - Leave out the benchmark's design families (PULPissimo/RI5CY, Ariane/CVA6, OpenPiton, OR1200), plus every file an hwe-bench test case touches, so both test sets measure generalization.
 2. **Remove duplicates and split.** Remove near-duplicates with MinHash. Split train/val/test by project family, never by file.
-3. **Inject bugs** (types B, C, D). Use rule-based mutations (reset value, inverted condition, off-by-one, FSM transition, swapped signals, removed check) plus realistic bugs written by DeepSeek. Run an equivalence check on each mutant: one that behaves the same as the original is labeled "no bug". Older hwe-bench OpenTitan cases, plus bug fixes mined from project history with hwe-bench's scripts, add real bugs.
-4. **Write properties** (type A). Start from CodeV-SVA's 324K RTL + SVA pairs, which only need SymbiYosys labels; DeepSeek writes assertions for modules that have none. SymbiYosys checks each one on the clean version and on each mutant.
+3. **Inject bugs** (types B, C, D). Use rule-based mutations (reset value, inverted condition, off-by-one, FSM transition, swapped signals, removed check) plus realistic bugs written by the teacher. Run an equivalence check on each mutant: one that behaves the same as the original is labeled "no bug". Older hwe-bench OpenTitan cases, plus bug fixes mined from project history with hwe-bench's scripts, add real bugs.
+4. **Write properties** (type A). Start from CodeV-SVA's 324K RTL + SVA pairs, which only need SymbiYosys labels; the teacher writes assertions for modules that have none. SymbiYosys checks each one on the clean version and on each mutant.
     - A proof or a counterexample becomes a hard label. "No violation within k cycles" gets a softer label, and timeouts are dropped.
     - Aim for roughly half violated and half holding.
-5. **Answer structural questions** (type H) with tools where possible. DeepSeek labels the rest with 3–5 samples each.
-6. **Check the teacher.** On type A and B questions, compare DeepSeek's answers with the tool labels. Its accuracy there sets the weight its labels get elsewhere.
+5. **Answer structural questions** (type H) with tools where possible. The teacher labels the rest with 3–5 samples each.
+6. **Check the teacher.** On type A and B questions, compare the teacher's answers with the tool labels. Its accuracy there sets the weight its labels get elsewhere.
 
 Phase 1 ends with dataset v1, its statistics (items per type, label balance, label sources) and the teacher-vs-tool agreement report.
 
@@ -198,7 +198,7 @@ Phase 2 ends with a table of baseline numbers that every later model must beat.
 
 - Majority class
 - Zero-shot Qwen3-8B with the constrained readout
-- DeepSeek on a sample of the same questions; this sets a teacher ceiling and shows where the teacher is wrong
+- The teacher (GLM3-Flash) on a sample of the same questions; this sets a teacher ceiling and shows where the teacher is wrong
 
 **Results so far.** Zero-shot Qwen3-8B (Oct 14, 2026, 4 H20s, cleaned test set) is no better than chance at telling buggy code from fixed code, or violated properties from holding ones, and it can't find bugs either. It is also overconfident: its log loss is 1.5–5× that of always predicting the label frequencies. The model has to beat both the base rate and these numbers.
 
@@ -295,7 +295,7 @@ Phase 5 ends with a target recall at a fixed false-alarm rate on the benchmark, 
     - Overlapping protected address ranges
     - FSM hang or unreachable state
     - Wrong privilege level, or a CSR accessible from a lower privilege
-3. **Labels by construction.** DeepSeek injects a template into a clean training module and writes the SVA property that should catch it. SymbiYosys confirms that the property fails on the injected version and holds on the clean one. That gives labels for types A and G, with the CWE and category from the template.
+3. **Labels by construction.** The teacher injects a template into a clean training module and writes the SVA property that should catch it. SymbiYosys confirms that the property fails on the injected version and holds on the clean one. That gives labels for types A and G, with the CWE and category from the template.
 4. **Negatives and base rate.** Pair each injected module with its clean version and benign look-alikes. Keep a realistic base rate: most modules are clean.
 5. **Train.** Continue from the Phase 4 checkpoint, mixing in general hardware data so the model keeps what it learned.
 6. **Evaluate** on the 119 benchmark properties, the Hack@DAC bug descriptions, and a security gold set you review.
@@ -320,23 +320,23 @@ The biggest risk is open-source formal tools failing on heavy SystemVerilog, bec
 | Mutants that change nothing | False "bug" labels | Equivalence check on every mutant |
 | Duplicates or design families shared by train and test | Inflated scores | MinHash dedup; split by family; keep benchmark families and hwe-bench test files out of training |
 | Security benchmark is small (119) and 73% violations | Noisy eval | Report recall and calibration with confidence intervals; add our own held-out security set |
-| DeepSeek is weak on hardware meaning | Bad soft labels | Measure it against tool labels in Phase 1; lower its weight |
-| Synthetic bugs don't look like real ones | Poor transfer | Test on Hack@DAC bugs; prefer realistic injections written by DeepSeek over rule-based mutations |
+| The teacher is weak on hardware meaning | Bad soft labels | Measure it against tool labels in Phase 1; lower its weight |
+| Synthetic bugs don't look like real ones | Poor transfer | Test on Hack@DAC bugs; prefer realistic injections written by the teacher over rule-based mutations |
 | RTL longer than the context window | Truncated states | Windows at random offsets, so the bug's position carries no signal (27% of hwe-bench files exceed 8k tokens); module-level states for synthetic data |
-| Slow DeepSeek throughput | Data generation stalls | Measure in Phase 0; do the tool-labeled types first |
+| Little teacher throughput (the endpoint is shared) | Data generation stalls | Measure at 4 requests at a time; do the tool-labeled types first; ask for patches and short answers, not whole files |
 
 ## Open questions and decision log
 
-Five questions are open. The most important is which question types make up v1.
+Four questions are open. The most important is which question types make up v1.
 
 - [ ] Which question types go into v1? (Proposal: A as the core, plus B, C, D and H)
 - [ ] Which hwe-bench cases are test-only? (Proposal: all Ibex, CVA6 and Caliptra cases, plus OpenTitan cases from 2024 on, for 126 in total. The 195 older OpenTitan cases become real-bug training data.)
-- [ ] Can the H20 server, or a machine next to it, reach DeepSeek? That's where the data pipeline will run.
 - [ ] Are the H20 cards 96 GB or 141 GB?
 - [ ] Do you have JasperGold access? The plan assumes open-source tools only.
 
 | Date | Decision |
 | --- | --- |
+| Oct 15, 2026 | The teacher is GLM3-Flash, not DeepSeek V4.1 Flash. The server reaches it (over 100 tokens/s), but colleagues share it, so our jobs use only part of its capacity: 4 requests at a time by default. Every Phase 0 guide step passes on the server, formal tools included |
 | Oct 15, 2026 | Memorization run: the 8B LoRA setup fits 64 training examples (loss 0.27 vs 1.28; training pairs 0.96–1.00), so the pipeline works and v1's 2 epochs underfit. Next: v1 for 10 epochs to see whether fitting real bugs carries over to unseen ones; the data work (mutant pilot) starts in parallel |
 | Oct 14, 2026 | LoRA v1 also stayed at the base rates (second-epoch training loss 1.34 vs 1.36), and buggy/fixed pairs are at chance. Its bug-location ranking beats chance (0.230 vs 0.150) and simple layout rules. The "elsewhere" examples' 0.5 weight now takes effect. Next: a 64-example memorization run on the GPUs decides between fixing the setup and getting more data |
 | Oct 14, 2026 | Data plan written ([Getting More Training Data](https://claude.ai/code/artifact/b54b90ea-0107-49a4-832c-ede95609c6cd)). Labeled bugs, not tokens, limit us: 174 distinct bugs vs about 30k examples for Kev-9B. Hardware CWEs become the label set and the recipes for injected security bugs, not training examples: 25 of the 34 CWEs with Verilog code quote test-family designs. Next: a 1,000-module mutant pilot, then a 30k slice of module-level examples (~1,500 tokens) |

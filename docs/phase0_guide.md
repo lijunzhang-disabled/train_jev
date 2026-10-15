@@ -5,7 +5,7 @@ https://claude.ai/code/artifact/95cbaea8-5860-4ab6-b94c-7f0dddbb66aa (Claude upd
 
 ## Overview
 
-Phase 0 proves that every piece works on the H20 server before we scale up data: the Python environment, the GPUs, the formal tools, the DeepSeek endpoint, and one small training run end to end. Plan for about half a day; most of it is waiting for downloads.
+Phase 0 proves that every piece works on the H20 server before we scale up data: the Python environment, the GPUs, the formal tools, the teacher endpoint, and one small training run end to end. Plan for about half a day; most of it is waiting for downloads.
 
 Run the steps in order. Each one ends with a check, and the section after step 9 lists what to paste back to me.
 
@@ -14,7 +14,7 @@ Run the steps in order. Each one ends with a check, and the section after step 9
 3. Check GPUs and libraries (5 min)
 4. Download the models (20–60 min, depends on bandwidth)
 5. Formal tools and the SymbiYosys smoke test (15 min)
-6. DeepSeek endpoint check (10 min)
+6. Teacher endpoint check (10 min)
 7. Build the benchmarks and the Phase 0 dataset (5 min)
 8. GPU smoke run on 2 cards (10 min)
 9. First real run: zero-shot baseline, then Qwen3-8B LoRA (1–2 h)
@@ -142,21 +142,21 @@ formal smoke test: OK
 
 **Check:** the last line reads `formal smoke test: OK`.
 
-## Step 6: Check the DeepSeek endpoint
+## Step 6: Check the teacher endpoint
 
-`tools/teacher.py` talks to DeepSeek through its OpenAI-compatible API, using only the Python standard library. Run it from the machine that will run the data pipeline. Phase 0 only checks the connection and measures throughput; teacher labeling starts in Phase 1.
+`tools/teacher.py` talks to the teacher model through its OpenAI-compatible API, using only the Python standard library. Our teacher is GLM3-Flash, on a server you share with colleagues. Run the script from the machine that will run the data pipeline. Phase 0 only checks the connection and measures throughput; teacher labeling starts in Phase 1.
 
 ```bash
 export TEACHER_BASE_URL=http://HOST:PORT/v1   # usually ends in /v1
 export TEACHER_MODEL=MODEL_NAME               # `check` lists what the server serves
 export TEACHER_API_KEY=KEY                    # only if the server needs one
 python3 -I tools/teacher.py check
-python3 -I tools/teacher.py bench --concurrency 32 --requests 64
+python3 -I tools/teacher.py bench --concurrency 4 --requests 16
 ```
 
 - `check` lists the served models and sends one short request. If the model returns its reasoning separately, it says so.
-- `bench` sends 64 requests that ask for SVA assertions, 32 at a time, and reports total output tokens/s and latency. That number sets the DeepSeek budget for Phase 1. If you can, also try `--concurrency 64` and `128` to see whether throughput keeps rising.
-- If DeepSeek runs on this same server, keep its GPUs separate from the training cards with `CUDA_VISIBLE_DEVICES`.
+- `bench` sends 16 requests that ask for SVA assertions, 4 at a time, and reports our output tokens/s and latency. That number sets the teacher budget for Phase 1.
+- The endpoint is shared, so don't raise the concurrency to find its limit. Our data jobs will stay at about this level.
 
 **Check:** both commands end in `[PASS]` lines. Note the output tokens/s from `bench`.
 
@@ -278,7 +278,7 @@ Every script below was run on the dev box before handoff. The GPU scripts were r
 | `tools/download_models.sh` | Downloads Qwen3-0.6B / 1.7B / 8B into `models/`, from ModelScope (or Hugging Face with `SOURCE=hf`) | 4 |
 | `tools/install_oss_cad_suite.sh` | Installs the pinned OSS CAD Suite build without root | 5 |
 | `tools/formal_smoke.sh` | SymbiYosys proves one property and catches one injected bug; checks yosys-slang | 5 |
-| `tools/teacher.py` | DeepSeek client: `check` (connection) and `bench` (throughput); `--mock` for testing | 6 |
+| `tools/teacher.py` | Teacher client: `check` (connection) and `bench` (throughput); `--mock` for testing | 6 |
 | `tools/fetch_benchmarks.sh` | Downloads verification-benchmarks and hwe-bench at pinned versions | 7 |
 | `tools/build_benchmarks.py` | Merges both into `data/benchmarks/benchmarks.jsonl`, with buggy/fixed RTL and changed lines | 7 |
 | `tools/build_phase0_data.py` | Builds `data/phase0/` training and test examples | 7 |
